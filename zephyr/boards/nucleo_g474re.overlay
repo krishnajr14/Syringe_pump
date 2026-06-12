@@ -1,0 +1,58 @@
+/*
+ * nucleo_g474re.overlay
+ * Device tree overlay — maps stepper GPIO, PWM, and UART pins.
+ * Adjust pin numbers to match your physical wiring.
+ *
+ * NUCLEO-G474RE default UART console: USART2 on PA2/PA3 (ST-LINK VCP).
+ *
+ * Stepper wiring (TMC2209 SilentStepStick):
+ *   PB0 → STEP
+ *   PB1 → DIR
+ *   PB2 → EN  (active-low)
+ *
+ * LED (alarm indicator):
+ *   PC13 → onboard LD2 (active-high on NUCLEO)
+ *
+ * Endstop limit switches:
+ *   PA8  → ENDSTOP_MIN
+ *   PA9  → ENDSTOP_MAX
+ */
+
+/ {
+    stepper_gpios {
+        compatible = "gpio-leds";
+
+        step_pin: step_pin {
+            gpios = <&gpiob 0 GPIO_ACTIVE_HIGH>;
+            label = "STEPPER_STEP";
+        };
+        dir_pin: dir_pin {
+            gpios = <&gpiob 1 GPIO_ACTIVE_HIGH>;
+            label = "STEPPER_DIR";
+        };
+        en_pin: en_pin {
+            gpios = <&gpiob 2 GPIO_ACTIVE_LOW>;
+            label = "STEPPER_EN";
+        };
+    };
+
+    alarm_leds {
+        compatible = "gpio-leds";
+        alarm_led: alarm_led {
+            gpios = <&gpioc 13 GPIO_ACTIVE_HIGH>;
+            label = "ALARM_LED";
+        };
+    };
+
+    endstops {
+        compatible = "gpio-keys";
+        endstop_min: endstop_min {
+            gpios = <&gpioa 8 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+            label = "ENDSTOP_MIN";
+        };
+        endstop_max: endstop_max {
+            gpios = <&gpioa 9 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+            label = "ENDSTOP_MAX";
+        };
+    };
+};
