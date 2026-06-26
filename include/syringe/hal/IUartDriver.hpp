@@ -9,9 +9,9 @@
 // Concrete production impl wraps Zephyr uart_poll_out / uart_poll_in.
 // Test stub captures TX bytes into a fixed buffer.
 // ---------------------------------------------------------------------------
-class IUartDriver {
+class IUartDriver { 
 public:
-    virtual ~IUartDriver() = default;
+    virtual ~IUartDriver() = default;   // LCOV_EXCL_LINE
 
     // Transmit len bytes from buf. Blocking until all bytes enqueued.
     virtual void transmit(const uint8_t* buf, size_t len) noexcept = 0;

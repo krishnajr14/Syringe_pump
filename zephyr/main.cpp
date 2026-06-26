@@ -18,6 +18,8 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/gpio.h>
+K_MUTEX_DEFINE(psm_mutex);
+
 
 // Pure C++ business logic — no Zephyr inside these headers
 #include "syringe/PumpStateMachine.hpp"
@@ -107,6 +109,28 @@ private:
 // LedAlarmObserver
 // Turns the alarm LED on/off on every alarm edge.
 // ------------------------------------------------------------
+// Add this class alongside UartAlarmObserver and LedAlarmObserver
+class BuzzerAlarmObserver final : public IAlarmObserver {
+public:
+    explicit BuzzerAlarmObserver(const struct gpio_dt_spec buzzer) noexcept
+        : buzzer_(buzzer) {}
+
+    void onAlarm(AlarmType /*type*/) noexcept override {
+        // Beep 3 times
+        for (int i = 0; i < 3; ++i) {
+            gpio_pin_set_dt(&buzzer_, 1);
+            k_sleep(K_MSEC(200));
+            gpio_pin_set_dt(&buzzer_, 0);
+            k_sleep(K_MSEC(100));
+        }
+    }
+    void onAlarmCleared(AlarmType /*type*/) noexcept override {
+        gpio_pin_set_dt(&buzzer_, 0);
+    }
+private:
+    struct gpio_dt_spec buzzer_;
+};
+
 class LedAlarmObserver final : public IAlarmObserver {
 public:
     explicit LedAlarmObserver(const struct gpio_dt_spec led) noexcept
@@ -126,7 +150,7 @@ private:
 // ============================================================
 // Static storage — ALL objects placement-new'd, zero heap
 // ============================================================
-static constexpr uint32_t NL_PER_STEP   = 3U;       // ~2.58 nL/step rounded up
+static constexpr uint32_t NL_PER_STEP   = 1000U;       // ~2.58 nL/step rounded up
 static constexpr uint32_t TARGET_VOL_UL = 10000U;   // 10 mL default
 
 static VolumeTracker g_tracker{NL_PER_STEP};
@@ -152,6 +176,9 @@ K_THREAD_STACK_DEFINE(pump_stack, 1024);
 static struct k_thread pump_thread;
 
 static void pump_tick_fn(void*, void*, void*) {
+    k_mutex_lock(&psm_mutex, K_FOREVER);
+    g_psm->tick();
+    k_mutex_unlock(&psm_mutex);
     while (true) {
         if (g_psm != nullptr) {
             g_psm->tick();
@@ -164,13 +191,75 @@ static void pump_tick_fn(void*, void*, void*) {
 K_THREAD_STACK_DEFINE(uart_stack, 512);
 static struct k_thread uart_thread;
 
+// Helper to print string over UART
+static void uart_print(const struct device* uart, const char* msg) {
+    while (msg && *msg) {
+        uart_poll_out(uart, *msg++);
+    }
+}
+
 static void uart_rx_fn(void* arg, void*, void*) {
     const struct device* uart = static_cast<const struct device*>(arg);
     uint8_t byte = 0U;
+
+    uart_print(uart, "=== Syringe Pump Ready ===\r\n");
+    uart_print(uart, "Commands: START, STOP, PAUSE, RESUME, SET_RATE <n>, CLEAR_ALARM\r\n");
+
     while (true) {
-        if (uart_poll_in(uart, &byte) == 0) {
-            if (g_parser != nullptr) {
-                g_parser->feedByte(byte);
+        if (uart_poll_in(uart, &byte) == 0 && g_parser != nullptr) {
+            
+            // Protect parser feeding and state reading from pump tick thread preemptions
+            k_mutex_lock(&psm_mutex, K_FOREVER);
+            ParseResult r = g_parser->feedByte(byte);
+            PumpState currentState = g_psm->currentState();
+            k_mutex_unlock(&psm_mutex);
+
+            // Echo the byte back so you can see what you typed
+            uart_poll_out(uart, byte);
+
+            // Only reply when full command received (newline hit)
+            if (byte == '\n' || byte == '\r') {
+                switch (r) {
+                    case ParseResult::OK:
+                        // Reply based on thread-safe read state
+                        switch (currentState) {
+                            case PumpState::PRIMING:
+                                uart_print(uart, ">> Priming started...\r\n");
+                                break;
+                            case PumpState::INFUSING:
+                                uart_print(uart, ">> Infusing...\r\n");
+                                break;
+                            case PumpState::PAUSED:
+                                uart_print(uart, ">> Paused.\r\n");
+                                break;
+                            case PumpState::IDLE:
+                                uart_print(uart, ">> Stopped. Back to IDLE.\r\n");
+                                break;
+                            case PumpState::OCCLUSION_ALARM:
+                                uart_print(uart, ">> OCCLUSION ALARM! Type CLEAR_ALARM after fixing.\r\n");
+                                break;
+                            case PumpState::COMPLETE:
+                                uart_print(uart, ">> Infusion complete!\r\n");
+                                break;
+                            default:
+                                break;
+                        }
+                        break;
+
+                    case ParseResult::ERR_UNKNOWN_CMD:
+                        uart_print(uart, ">> ERROR: Unknown command.\r\n");
+                        break;
+                    case ParseResult::ERR_BAD_PARAM:
+                        uart_print(uart, ">> ERROR: Bad parameter. Example: SET_RATE 120\r\n");
+                        break;
+                    case ParseResult::ERR_EMPTY:
+                        break;   // ignore empty lines silently
+                    case ParseResult::ERR_TOO_LONG:
+                        uart_print(uart, ">> ERROR: Command too long.\r\n");
+                        break;
+                    default:
+                        break;
+                }
             }
         }
         k_yield();

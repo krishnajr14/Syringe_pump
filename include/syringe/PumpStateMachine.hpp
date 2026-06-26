@@ -75,6 +75,8 @@ private:
     uint32_t  targetVolumeUL_;
     uint32_t  rateULperMin_{0};
     uint32_t  primingSteps_{0};
+    uint32_t stepIntervalUs_{0U};
+    uint32_t tickAccumulatorUs_{0U};
 
     // Number of microsteps performed during priming (air purge).
     static constexpr uint32_t PRIMING_STEP_COUNT = 500U;

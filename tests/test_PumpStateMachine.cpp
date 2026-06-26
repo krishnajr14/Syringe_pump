@@ -278,10 +278,11 @@ TEST_F(PsmTest, DefaultRate_IsZero) {
 // ── Tick ──────────────────────────────────────────────────────────────────
 TEST_F(PsmTest, Tick_InInfusing_AccumulatesSteps) {
     auto psm = make(10000U);
+    psm.setRate(6000U);   // interval = 10,000 µs = 50 ticks
     psm.handleEvent(PumpEvent::CMD_START);
     psm.handleEvent(PumpEvent::PRIMING_DONE);
-    psm.tick();
-    psm.tick();
+    // 50 ticks = first step, 100 ticks = second step
+    for (int i = 0; i < 100; ++i) psm.tick();
     EXPECT_EQ(g_tracker.stepCount(), 2U);
 }
 
@@ -299,9 +300,8 @@ TEST_F(PsmTest, Tick_InIdle_NoStepping) {
 }
 
 TEST_F(PsmTest, Tick_AutoTransition_ToComplete_WhenVolumeReached) {
-    // Use 1000 nL/step so 1 step = 1 µL = target
-    static VolumeTracker  localTracker{1000U};
-    static AlarmManager   localAlarms;
+    static VolumeTracker     localTracker{1000U};
+    static AlarmManager      localAlarms;
     static AlarmObserverStub localObs;
     localTracker.reset();
     localObs.reset();
@@ -309,9 +309,12 @@ TEST_F(PsmTest, Tick_AutoTransition_ToComplete_WhenVolumeReached) {
     localAlarms.registerObserver(&localObs);
 
     PumpStateMachine psm{g_stepper, localAlarms, localTracker, 1U};
+    psm.setRate(6000U);   // interval = 10,000 µs = 50 ticks per step
     psm.handleEvent(PumpEvent::CMD_START);
     psm.handleEvent(PumpEvent::PRIMING_DONE);
-    psm.tick();   // 1 step → 1000 nL = 1 µL ≥ target → COMPLETE
+
+    // 50 ticks → 1 step → 1000 nL = 1 µL ≥ target → COMPLETE
+    for (int i = 0; i < 50; ++i) psm.tick();
 
     EXPECT_EQ(psm.currentState(), PumpState::COMPLETE);
     EXPECT_EQ(localObs.raiseCount(), 1U);
@@ -379,4 +382,106 @@ TEST_F(PsmTest, Branch_Complete_InvalidEvent_Pause) {
     // COMPLETE has no CMD_PAUSE transition
     EXPECT_FALSE(psm.handleEvent(PumpEvent::CMD_PAUSE));
     EXPECT_EQ(psm.currentState(), PumpState::COMPLETE);
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// Rate-controlled tick timing tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST_F(PsmTest, RateControl_NoStep_BeforeIntervalElapsed) {
+    auto psm = make(10000U);
+    psm.setRate(120U);       // 120 µL/min → interval = 500,000 µs
+    psm.handleEvent(PumpEvent::CMD_START);
+    psm.handleEvent(PumpEvent::PRIMING_DONE);
+
+    // Each tick = 200 µs. Need 2500 ticks to reach 500,000 µs.
+    // After 2499 ticks → no step yet
+    for (int i = 0; i < 2499; ++i) psm.tick();
+    EXPECT_EQ(g_tracker.stepCount(), 0U);
+}
+
+TEST_F(PsmTest, RateControl_StepFires_AtExactInterval) {
+    auto psm = make(10000U);
+    psm.setRate(120U);       // interval = 500,000 µs = 2500 ticks
+    psm.handleEvent(PumpEvent::CMD_START);
+    psm.handleEvent(PumpEvent::PRIMING_DONE);
+
+    for (int i = 0; i < 2500; ++i) psm.tick();
+    EXPECT_EQ(g_tracker.stepCount(), 1U);
+}
+
+TEST_F(PsmTest, RateControl_TwoSteps_AfterTwoIntervals) {
+    auto psm = make(10000U);
+    psm.setRate(120U);       // 2500 ticks per step
+    psm.handleEvent(PumpEvent::CMD_START);
+    psm.handleEvent(PumpEvent::PRIMING_DONE);
+
+    for (int i = 0; i < 5000; ++i) psm.tick();
+    EXPECT_EQ(g_tracker.stepCount(), 2U);
+}
+
+TEST_F(PsmTest, RateControl_ZeroRate_NoStep) {
+    auto psm = make(10000U);
+    psm.setRate(0U);         // no rate set → no stepping
+    psm.handleEvent(PumpEvent::CMD_START);
+    psm.handleEvent(PumpEvent::PRIMING_DONE);
+
+    for (int i = 0; i < 10000; ++i) psm.tick();
+    EXPECT_EQ(g_tracker.stepCount(), 0U);
+}
+
+TEST_F(PsmTest, RateControl_HighRate_6000ULmin) {
+    auto psm = make(10000U);
+    psm.setRate(6000U);      // interval = 60,000,000 / 6000 = 10,000 µs = 50 ticks
+    psm.handleEvent(PumpEvent::CMD_START);
+    psm.handleEvent(PumpEvent::PRIMING_DONE);
+
+    for (int i = 0; i < 50; ++i) psm.tick();
+    EXPECT_EQ(g_tracker.stepCount(), 1U);
+}
+
+TEST_F(PsmTest, RateControl_AccumulatorResets_AfterPause) {
+    auto psm = make(10000U);
+    psm.setRate(120U);       // 2500 ticks per step
+    psm.handleEvent(PumpEvent::CMD_START);
+    psm.handleEvent(PumpEvent::PRIMING_DONE);
+
+    // Run 1000 ticks (not enough for a step)
+    for (int i = 0; i < 1000; ++i) psm.tick();
+    EXPECT_EQ(g_tracker.stepCount(), 0U);
+
+    // Pause and resume
+    psm.handleEvent(PumpEvent::CMD_PAUSE);
+    psm.handleEvent(PumpEvent::CMD_RESUME);
+
+    // Run another 2500 ticks — should get exactly 1 step
+    // because accumulator reset on enterInfusing()
+    for (int i = 0; i < 2500; ++i) psm.tick();
+    EXPECT_EQ(g_tracker.stepCount(), 1U);
+}
+
+TEST_F(PsmTest, RateControl_VolumeAccuracy_120ULmin) {
+    // At 120 µL/min, after 60 seconds (300,000 ticks at 200µs each)
+    // we expect exactly 120 µL delivered (120 steps)
+    // 120 µL/min × 1 min = 120 µL = 120 steps
+    // 120 steps × 2500 ticks/step = 300,000 ticks
+
+    // Use 1000 nL/step so 1 step = 1 µL exactly
+    static VolumeTracker localTracker{1000U};
+    static AlarmManager  localAlarms;
+    static AlarmObserverStub localObs;
+    localTracker.reset();
+    localObs.reset();
+    localAlarms = AlarmManager{};
+    localAlarms.registerObserver(&localObs);
+
+    PumpStateMachine psm{g_stepper, localAlarms, localTracker, 10000U};
+    psm.setRate(120U);
+    psm.handleEvent(PumpEvent::CMD_START);
+    psm.handleEvent(PumpEvent::PRIMING_DONE);
+
+    // 300,000 ticks = 60 seconds at 200µs/tick
+    for (int i = 0; i < 300'000; ++i) psm.tick();
+
+    EXPECT_EQ(localTracker.stepCount(), 120U);
+    EXPECT_EQ(localTracker.volumeUL(), 120U);
 }

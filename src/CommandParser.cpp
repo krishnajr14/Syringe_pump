@@ -79,6 +79,10 @@ ParseResult CommandParser::dispatch(const char* cmd) noexcept {
         psm_.handleEvent(PumpEvent::ALARM_CLEARED);
         return ParseResult::OK;
     }
+    if (strcmp(cmd, "SIM_OCCLUSION") == 0) {
+        psm_.handleEvent(PumpEvent::OCCLUSION_DETECT);
+        return ParseResult::OK;
+    }
     if (startsWith(cmd, "SET_RATE ")) {
         bool ok = false;
         const uint32_t rate = parseUInt(cmd + 9U, ok);

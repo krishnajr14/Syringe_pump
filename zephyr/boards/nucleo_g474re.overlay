@@ -6,16 +6,16 @@
  * NUCLEO-G474RE default UART console: USART2 on PA2/PA3 (ST-LINK VCP).
  *
  * Stepper wiring (TMC2209 SilentStepStick):
- *   PB0 → STEP
- *   PB1 → DIR
- *   PB2 → EN  (active-low)
+ * PB0 → STEP
+ * PB1 → DIR
+ * PB2 → EN  (active-low)
  *
  * LED (alarm indicator):
- *   PC13 → onboard LD2 (active-high on NUCLEO)
+ * PC13 → onboard LD2 (active-high on NUCLEO)
  *
  * Endstop limit switches:
- *   PA8  → ENDSTOP_MIN
- *   PA9  → ENDSTOP_MAX
+ * PA8  → ENDSTOP_MIN
+ * PA9  → ENDSTOP_MAX
  */
 
 / {
@@ -44,6 +44,15 @@
         };
     };
 
+    /* Moved the buzzer node inside the root block under a proper compatible driver */
+    buzzer {
+        compatible = "gpio-leds";
+        buzzer_pin: buzzer_pin {
+            gpios = <&gpioa 10 GPIO_ACTIVE_HIGH>;
+            label = "BUZZER";
+        };
+    };
+
     endstops {
         compatible = "gpio-keys";
         endstop_min: endstop_min {
@@ -55,4 +64,11 @@
             label = "ENDSTOP_MAX";
         };
     };
+};
+
+&usart2 {
+    current-speed = <115200>;
+    pinctrl-0 = <&usart2_tx_pa2 &usart2_rx_pa3>;
+    pinctrl-names = "default";
+    status = "okay";
 };

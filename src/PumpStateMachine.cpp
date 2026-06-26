@@ -111,10 +111,17 @@ void PumpStateMachine::tick() noexcept {
     }
 
     if (state_ == PumpState::INFUSING) {
-        stepper_.step();
-        tracker_.addSteps(1U);
-        if (tracker_.volumeUL() >= targetVolumeUL_) {
-            handleEvent(PumpEvent::VOLUME_REACHED);
+        if (stepIntervalUs_ == 0U) return;   // no rate set — do nothing
+
+        tickAccumulatorUs_ += 200U;           // each tick = 200 µs
+
+        if (tickAccumulatorUs_ >= stepIntervalUs_) {
+            tickAccumulatorUs_ = 0U;
+            stepper_.step();
+            tracker_.addSteps(1U);
+            if (tracker_.volumeUL() >= targetVolumeUL_) {
+                handleEvent(PumpEvent::VOLUME_REACHED);
+            }
         }
     }
 }
@@ -122,6 +129,13 @@ void PumpStateMachine::tick() noexcept {
 // ---------------------------------------------------------------------------
 void PumpStateMachine::setRate(uint32_t uLperMin) noexcept {
     rateULperMin_ = uLperMin;
+    if (uLperMin == 0U) {
+        stepIntervalUs_ = 0U;
+        return;
+    }
+    // 1 step = 1 µL
+    // µs per step = 60,000,000 / uLperMin
+    stepIntervalUs_ = 60'000'000U / uLperMin;
 }
 
 uint32_t PumpStateMachine::getRate() const noexcept {
@@ -165,6 +179,7 @@ void PumpStateMachine::enterPriming() noexcept {
 }
 
 void PumpStateMachine::enterInfusing() noexcept {
+    tickAccumulatorUs_ = 0U;   // add this line
     stepper_.setDirection(true);
     stepper_.enable();
 }

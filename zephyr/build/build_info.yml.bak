@@ -1,0 +1,4 @@
+west:
+  command: /home/krishna-inc-5836/.local/bin/west build -b nucleo_g474re
+  topdir: /home/krishna-inc-5836/zephyrproject
+  version: 1.5.0
