@@ -218,17 +218,47 @@ static void uart_rx_fn(void* arg, void*, void*) {
     const struct device* uart = static_cast<const struct device*>(arg);
     uint8_t byte = 0U;
 
-    // Buffer to track the last complete command for context-specific replies
     static char     lastCmd[CMD_BUF_SIZE]{};
     static uint8_t  lastPos = 0U;
+
+    // Track the last state we printed to prevent spamming the console
+    static PumpState lastReportedState = PumpState::IDLE;
 
     uart_print(uart, "=== Syringe Pump Ready ===\r\n");
     uart_print(uart, "Commands: START, STOP, PAUSE, RESUME, SET_RATE <n>, CLEAR_ALARM, SIM_OCCLUSION\r\n");
 
     while (true) {
+        // ─────────────────────────────────────────────────────────────────
+        // 1. ASYNC STATE MONITORING (Runs continuously)
+        // ─────────────────────────────────────────────────────────────────
+        if (k_mutex_lock(&psm_mutex, K_NO_WAIT) == 0) {
+            PumpState currentState = g_psm->currentState();
+            k_mutex_unlock(&psm_mutex);
+
+            // If the background thread changed the state, print it immediately!
+            if (currentState != lastReportedState) {
+                switch (currentState) {
+                    case PumpState::INFUSING:
+                        uart_print(uart, "\r\n>> Auto-Transition: Infusing...\r\n");
+                        break;
+                    case PumpState::COMPLETE:
+                        uart_print(uart, "\r\n>> Auto-Transition: Infusion complete!\r\n");
+                        break;
+                    case PumpState::OCCLUSION_ALARM:
+                        uart_print(uart, "\r\n>> ALERT: OCCLUSION ALARM DETECTED!\r\n");
+                        break;
+                    default:
+                        break;
+                }
+                lastReportedState = currentState;
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────
+        // 2. INCOMING SERIAL CHARACTER PROCESSING
+        // ─────────────────────────────────────────────────────────────────
         if (uart_poll_in(uart, &byte) == 0 && g_parser != nullptr) {
 
-            // Build lastCmd buffer — mirrors feedByte frame logic
             if (byte == '\n' || byte == '\r') {
                 lastCmd[lastPos] = '\0';
                 lastPos = 0U;
@@ -236,58 +266,49 @@ static void uart_rx_fn(void* arg, void*, void*) {
                 lastCmd[lastPos++] = static_cast<char>(byte);
             }
 
-            // Feed byte to parser and capture state — both under mutex
+            // Echo character back to terminal
+            uart_poll_out(uart, byte);
+
             k_mutex_lock(&psm_mutex, K_FOREVER);
             ParseResult r          = g_parser->feedByte(byte);
             bool        wasSetRate = g_parser->lastCommandWasSetRate();
             PumpState   state      = g_psm->currentState();
             k_mutex_unlock(&psm_mutex);
 
-            // Echo the byte back so you can see what you typed
-            uart_poll_out(uart, byte);
-
-            // Only reply when full command frame received (newline/CR)
-            if (byte != '\n' && byte != '\r') {
+            // Keep track of manual actions to sync our async logger
+            if (byte == '\n' || byte == '\r') {
+                lastReportedState = state; 
+            } else {
                 k_yield();
                 continue;
             }
 
+            // Process explicit user command feedback
             switch (r) {
                 case ParseResult::OK:
-                    // SET_RATE is state-independent — check first
                     if (wasSetRate) {
                         uart_print(uart, ">> Rate set.\r\n");
                         break;
                     }
-                    // CLEAR_ALARM always transitions to PAUSED
                     if (strcmp(lastCmd, "CLEAR_ALARM") == 0) {
                         uart_print(uart, ">> Alarm cleared. Type RESUME to continue.\r\n");
                         break;
                     }
-                    // SIM_OCCLUSION reply
                     if (strcmp(lastCmd, "SIM_OCCLUSION") == 0) {
                         uart_print(uart, ">> Occlusion simulated.\r\n");
                         break;
                     }
-                    // All other commands — reply based on resulting state
+                    
+                    // Direct command acknowledgment responses
                     switch (state) {
                         case PumpState::PRIMING:
                             uart_print(uart, ">> Priming started...\r\n");
-                            break;
-                        case PumpState::INFUSING:
-                            uart_print(uart, ">> Infusing...\r\n");
                             break;
                         case PumpState::PAUSED:
                             uart_print(uart, ">> Paused.\r\n");
                             break;
                         case PumpState::IDLE:
                             uart_print(uart, ">> Stopped. Back to IDLE.\r\n");
-                            break;
-                        case PumpState::OCCLUSION_ALARM:
-                            uart_print(uart, ">> OCCLUSION ALARM! Type CLEAR_ALARM after fixing.\r\n");
-                            break;
-                        case PumpState::COMPLETE:
-                            uart_print(uart, ">> Infusion complete!\r\n");
                             break;
                         default:
                             break;
@@ -300,15 +321,16 @@ static void uart_rx_fn(void* arg, void*, void*) {
                 case ParseResult::ERR_BAD_PARAM:
                     uart_print(uart, ">> ERROR: Bad parameter. Example: SET_RATE 120\r\n");
                     break;
-                case ParseResult::ERR_EMPTY:
-                    break;   // ignore empty lines silently
                 case ParseResult::ERR_TOO_LONG:
                     uart_print(uart, ">> ERROR: Command too long.\r\n");
                     break;
+                case ParseResult::ERR_EMPTY:
                 default:
                     break;
             }
         }
+        
+        // Relinquish remaining time slice to prevent starving lower priority tasks
         k_yield();
     }
 }
