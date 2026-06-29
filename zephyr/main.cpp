@@ -24,6 +24,7 @@
 // between pump_tick_thread and uart_rx_thread.
 K_MUTEX_DEFINE(psm_mutex);
 
+
 // Pure C++ business logic — no Zephyr inside these headers
 #include "syringe/PumpStateMachine.hpp"
 #include "syringe/VolumeTracker.hpp"
@@ -184,19 +185,12 @@ static void uart_print(const struct device* uart, const char* msg) {
 }
 
 // ============================================================
-// pump_tick_thread — steps motor every 200 µs
-// ============================================================
-K_THREAD_STACK_DEFINE(pump_stack, 1024);
-static struct k_thread pump_thread;
+// Hardware timer — fires exactly every 200µs regardless of scheduler
+static struct k_timer pump_timer;
 
-static void pump_tick_fn(void*, void*, void*) {
-    while (true) {
-        k_mutex_lock(&psm_mutex, K_FOREVER);
-        if (g_psm != nullptr) {
-            g_psm->tick();
-        }
-        k_mutex_unlock(&psm_mutex);
-        k_sleep(K_USEC(200U));
+static void pump_timer_fn(struct k_timer* /*timer*/) {
+    if (g_psm != nullptr) {
+        g_psm->tick();
     }
 }
 
@@ -348,11 +342,9 @@ int main(void) {
     g_parser = new (buf_parser) CommandParser{*g_psm};
 
     // ── Start threads ─────────────────────────────────────────────────────
-    k_thread_create(&pump_thread,
-                    pump_stack, K_THREAD_STACK_SIZEOF(pump_stack),
-                    pump_tick_fn, nullptr, nullptr, nullptr,
-                    K_PRIO_PREEMPT(5), 0, K_NO_WAIT);
-    k_thread_name_set(&pump_thread, "pump_tick");
+    // Start hardware timer — exact 200µs interval
+    k_timer_init(&pump_timer, pump_timer_fn, nullptr);
+    k_timer_start(&pump_timer, K_USEC(200), K_USEC(200));
 
     k_thread_create(&uart_thread,
                     uart_stack, K_THREAD_STACK_SIZEOF(uart_stack),
