@@ -21,7 +21,6 @@ CommandParser::CommandParser(PumpStateMachine& psm) noexcept
 ParseResult CommandParser::feedByte(uint8_t byte) noexcept {
     if (byte == '\n' || byte == '\r') {
         if (overflow_) {
-            // Overflowed frame complete — discard, reset, report error.
             overflow_ = false;
             pos_      = 0U;
             buf_.fill('\0');
@@ -36,7 +35,6 @@ ParseResult CommandParser::feedByte(uint8_t byte) noexcept {
         return r;
     }
 
-    // Non-terminator byte.
     if (overflow_) {
         return ParseResult::OK;   // Silently swallow — frame already overflowed.
     }
@@ -59,6 +57,8 @@ ParseResult CommandParser::parse(const char* cmd) noexcept {
 
 // ---------------------------------------------------------------------------
 ParseResult CommandParser::dispatch(const char* cmd) noexcept {
+    lastWasSetRate_ = false;
+
     if (strcmp(cmd, "START") == 0) {
         psm_.handleEvent(PumpEvent::CMD_START);
         return ParseResult::OK;
@@ -88,6 +88,7 @@ ParseResult CommandParser::dispatch(const char* cmd) noexcept {
         const uint32_t rate = parseUInt(cmd + 9U, ok);
         if (!ok || rate == 0U) return ParseResult::ERR_BAD_PARAM;
         psm_.setRate(rate);
+        lastWasSetRate_ = true;
         return ParseResult::OK;
     }
     return ParseResult::ERR_UNKNOWN_CMD;
@@ -103,8 +104,9 @@ bool CommandParser::startsWith(const char* s, const char* prefix) noexcept {
 
 // ---------------------------------------------------------------------------
 uint32_t CommandParser::parseUInt(const char* s, bool& ok) noexcept {
-    // Removed s == nullptr check because it's guaranteed non-null by internal callers
-    if (!isdigit(static_cast<unsigned char>(*s))) {
+    // nullptr check is mandatory — parse() can call dispatch() with
+    // cmd+9 where cmd is exactly "SET_RATE " with nothing after it.
+    if (s == nullptr || !isdigit(static_cast<unsigned char>(*s))) {
         ok = false;
         return 0U;
     }

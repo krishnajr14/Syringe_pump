@@ -51,10 +51,13 @@ public:
     // Parse a complete null-terminated command string (test entry point).
     ParseResult parse(const char* cmd) noexcept;
 
+    bool lastCommandWasSetRate() const noexcept { return lastWasSetRate_; }
+
 private:
     PumpStateMachine& psm_;
     std::array<char, CMD_BUF_SIZE> buf_{};
     uint8_t pos_{0};
+    bool lastWasSetRate_{false};
     bool    overflow_{false};   // true = frame exceeded CMD_BUF_SIZE, discard until '\n'
 
     // Dispatch a fully-received, null-terminated command string.

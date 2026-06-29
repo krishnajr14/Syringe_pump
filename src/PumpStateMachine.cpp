@@ -186,6 +186,7 @@ void PumpStateMachine::enterInfusing() noexcept {
 
 void PumpStateMachine::enterPaused() noexcept {
     stepper_.disable();
+    alarms_.clear(AlarmType::OCCLUSION);
 }
 
 void PumpStateMachine::enterOcclusionAlarm() noexcept {

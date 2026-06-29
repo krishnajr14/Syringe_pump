@@ -3107,7 +3107,7 @@ stm32_lp_tick_source: &lptim1 {
     alarm_leds {
         compatible = "gpio-leds";
         alarm_led: alarm_led {
-            gpios = <&gpioc 13 (0 << 0)>;
+            gpios = <&gpioa 5 (0 << 0)>;
             label = "ALARM_LED";
         };
     };

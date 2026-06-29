@@ -1034,7 +1034,7 @@
 	alarm_leds {
 		compatible = "gpio-leds";
 		alarm_led: alarm_led {
-			gpios = < &gpioc 0xd 0x0 >;
+			gpios = < &gpioa 0x5 0x0 >;
 			label = "ALARM_LED";
 		};
 	};
