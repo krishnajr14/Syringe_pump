@@ -185,12 +185,26 @@ static void uart_print(const struct device* uart, const char* msg) {
 }
 
 // ============================================================
-// Hardware timer — fires exactly every 200µs regardless of scheduler
+// Pump tick timer — used for precise 200µs synchronisation
 static struct k_timer pump_timer;
 
-static void pump_timer_fn(struct k_timer* /*timer*/) {
-    if (g_psm != nullptr) {
-        g_psm->tick();
+// Pump tick thread — wakes exactly every 200µs via timer sync
+K_THREAD_STACK_DEFINE(pump_stack, 2048);
+static struct k_thread pump_thread;
+
+static void pump_tick_fn(void*, void*, void*) {
+    k_timer_start(&pump_timer, K_USEC(200), K_USEC(200));
+
+    while (true) {
+        k_timer_status_sync(&pump_timer);
+
+        if (g_psm != nullptr) {
+            // Try to lock; if busy, skip this tick to keep real-time stability
+            if (k_mutex_lock(&psm_mutex, K_NO_WAIT) == 0) {
+                g_psm->tick();
+                k_mutex_unlock(&psm_mutex);
+            }
+        }
     }
 }
 
@@ -343,7 +357,15 @@ int main(void) {
 
     // ── Start threads ─────────────────────────────────────────────────────
     // Start hardware timer — exact 200µs interval
-    k_timer_init(&pump_timer, pump_timer_fn, nullptr);
+    // Init timer (no callback — used only for sync)
+    k_timer_init(&pump_timer, nullptr, nullptr);
+
+    k_thread_create(&pump_thread,
+                    pump_stack, K_THREAD_STACK_SIZEOF(pump_stack),
+                    pump_tick_fn, nullptr, nullptr, nullptr,
+                    K_PRIO_PREEMPT(5), 0, K_NO_WAIT);
+    k_thread_name_set(&pump_thread, "pump_tick");
+
     k_timer_start(&pump_timer, K_USEC(200), K_USEC(200));
 
     k_thread_create(&uart_thread,
