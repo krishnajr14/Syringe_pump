@@ -10,14 +10,6 @@ CommandParser::CommandParser(PumpStateMachine& psm) noexcept
 }
 
 // ---------------------------------------------------------------------------
-// feedByte — state machine for byte-at-a-time UART ingestion.
-//
-// Overflow strategy:
-//   Once a frame exceeds CMD_BUF_SIZE-1 bytes, set overflow_ = true and
-//   silently swallow all remaining bytes until the next '\n'/'\r'.
-//   On the terminator, return ERR_TOO_LONG and reset cleanly.
-//   This ensures the buffer is always valid and the next frame is accepted.
-// ---------------------------------------------------------------------------
 ParseResult CommandParser::feedByte(uint8_t byte) noexcept {
     if (byte == '\n' || byte == '\r') {
         if (overflow_) {
@@ -36,10 +28,10 @@ ParseResult CommandParser::feedByte(uint8_t byte) noexcept {
     }
 
     if (overflow_) {
-        return ParseResult::OK;   // Silently swallow — frame already overflowed.
+        return ParseResult::OK;
     }
     if (pos_ >= CMD_BUF_SIZE - 1U) {
-        overflow_ = true;         // Buffer full — mark overflow, swallow this byte.
+        overflow_ = true;
         return ParseResult::OK;
     }
     buf_[pos_++] = static_cast<char>(byte);
@@ -83,14 +75,49 @@ ParseResult CommandParser::dispatch(const char* cmd) noexcept {
         psm_.handleEvent(PumpEvent::OCCLUSION_DETECT);
         return ParseResult::OK;
     }
+    
+    // ── TWO-PARAMETER SET_RATE PARSING ─────────────────────────────────────
     if (startsWith(cmd, "SET_RATE ")) {
-        bool ok = false;
-        const uint32_t rate = parseUInt(cmd + 9U, ok);
-        if (!ok || rate == 0U) return ParseResult::ERR_BAD_PARAM;
-        psm_.setRate(rate);
+        const char* ptr = cmd + 9U;
+        
+        // 1. Parse Volume (mL)
+        if (ptr == nullptr || !isdigit(static_cast<unsigned char>(*ptr))) return ParseResult::ERR_BAD_PARAM;
+        uint32_t volume_ml = 0U;
+        while (isdigit(static_cast<unsigned char>(*ptr))) {
+            volume_ml = volume_ml * 10U + static_cast<uint32_t>(*ptr - '0');
+            ++ptr;
+        }
+        
+        // 2. Skip separating spaces
+        while (*ptr == ' ') {
+            ++ptr;
+        }
+        
+        // 3. Parse Duration (minutes)
+        if (*ptr == '\0' || !isdigit(static_cast<unsigned char>(*ptr))) return ParseResult::ERR_BAD_PARAM;
+        uint32_t duration_min = 0U;
+        while (isdigit(static_cast<unsigned char>(*ptr))) {
+            duration_min = duration_min * 10U + static_cast<uint32_t>(*ptr - '0');
+            ++ptr;
+        }
+
+        // 4. Verification Check
+        if (volume_ml == 0U || duration_min == 0U) return ParseResult::ERR_BAD_PARAM;
+        
+        // 5. Compute Flow Rate directly in uL/minute (Steps per minute)
+        uint32_t calculated_ul_min = (volume_ml * 1000U) / duration_min;
+        
+        if (calculated_ul_min == 0U) return ParseResult::ERR_BAD_PARAM;
+
+        // Pass calculated volumetric speed safely to the state machine
+        psm_.setRate(calculated_ul_min);
+        
+        // NOTE: setTargetVolume doesn't exist on your PSM. 
+        // The overall target tracking limit is safely preserved from main.cpp's constructor definition.
+
         lastWasSetRate_ = true;
         return ParseResult::OK;
-    }
+    }    
     return ParseResult::ERR_UNKNOWN_CMD;
 }
 
@@ -104,8 +131,6 @@ bool CommandParser::startsWith(const char* s, const char* prefix) noexcept {
 
 // ---------------------------------------------------------------------------
 uint32_t CommandParser::parseUInt(const char* s, bool& ok) noexcept {
-    // nullptr check is mandatory — parse() can call dispatch() with
-    // cmd+9 where cmd is exactly "SET_RATE " with nothing after it.
     if (s == nullptr || !isdigit(static_cast<unsigned char>(*s))) {
         ok = false;
         return 0U;
