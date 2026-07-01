@@ -76,7 +76,7 @@ ParseResult CommandParser::dispatch(const char* cmd) noexcept {
         return ParseResult::OK;
     }
     
-    // ── TWO-PARAMETER SET_RATE PARSING ─────────────────────────────────────
+    // ── TWO-PARAMETER SET_RATE PARSING (Seconds Variant) ───────────────────
     if (startsWith(cmd, "SET_RATE ")) {
         const char* ptr = cmd + 9U;
         
@@ -88,36 +88,33 @@ ParseResult CommandParser::dispatch(const char* cmd) noexcept {
             ++ptr;
         }
         
-        // 2. Skip separating spaces
+        // 2. Skip spaces
         while (*ptr == ' ') {
             ++ptr;
         }
         
-        // 3. Parse Duration (minutes)
+        // 3. Parse Duration (seconds)
         if (*ptr == '\0' || !isdigit(static_cast<unsigned char>(*ptr))) return ParseResult::ERR_BAD_PARAM;
-        uint32_t duration_min = 0U;
+        uint32_t duration_sec = 0U;
         while (isdigit(static_cast<unsigned char>(*ptr))) {
-            duration_min = duration_min * 10U + static_cast<uint32_t>(*ptr - '0');
+            duration_sec = duration_sec * 10U + static_cast<uint32_t>(*ptr - '0');
             ++ptr;
         }
 
-        // 4. Verification Check
-        if (volume_ml == 0U || duration_min == 0U) return ParseResult::ERR_BAD_PARAM;
+        // 4. Validation
+        if (volume_ml == 0U || duration_sec == 0U) return ParseResult::ERR_BAD_PARAM;
         
         // 5. Compute Flow Rate directly in uL/minute (Steps per minute)
-        uint32_t calculated_ul_min = (volume_ml * 1000U) / duration_min;
+        // Formula: ((Volume_ml * 1000) / duration_sec) * 60 seconds
+        uint32_t calculated_ul_min = ((volume_ml * 1000U) * 60U) / duration_sec;
         
         if (calculated_ul_min == 0U) return ParseResult::ERR_BAD_PARAM;
 
-        // Pass calculated volumetric speed safely to the state machine
+        // Pass calculated values safely down
         psm_.setRate(calculated_ul_min);
-        
-        // NOTE: setTargetVolume doesn't exist on your PSM. 
-        // The overall target tracking limit is safely preserved from main.cpp's constructor definition.
-
         lastWasSetRate_ = true;
         return ParseResult::OK;
-    }    
+    } 
     return ParseResult::ERR_UNKNOWN_CMD;
 }
 

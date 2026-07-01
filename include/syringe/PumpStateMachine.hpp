@@ -79,7 +79,7 @@ private:
     uint32_t tickAccumulatorUs_{0U};
 
     // Number of microsteps performed during priming (air purge).
-    static constexpr uint32_t PRIMING_STEP_COUNT = 500U;
+    static constexpr uint32_t PRIMING_STEP_COUNT = 1000U;
 
     // Validate transition per IEC 60601-2-24 Table 101.
     bool isValidTransition(PumpState from, PumpEvent event) const noexcept;
