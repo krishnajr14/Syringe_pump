@@ -3085,7 +3085,7 @@ stm32_lp_tick_source: &lptim1 {
 };
 # 0 "<command-line>" 2
 # 1 "/home/krishna-inc-5836/Downloads/Task_2/Code/syringe_pump_fixed/syringe_pump/zephyr/boards/nucleo_g474re.overlay" 1
-# 21 "/home/krishna-inc-5836/Downloads/Task_2/Code/syringe_pump_fixed/syringe_pump/zephyr/boards/nucleo_g474re.overlay"
+# 24 "/home/krishna-inc-5836/Downloads/Task_2/Code/syringe_pump_fixed/syringe_pump/zephyr/boards/nucleo_g474re.overlay"
 / {
     stepper_gpios {
         compatible = "gpio-leds";
@@ -3107,11 +3107,11 @@ stm32_lp_tick_source: &lptim1 {
     alarm_leds {
         compatible = "gpio-leds";
         alarm_led: alarm_led {
-            gpios = <&gpioa 5 (0 << 0)>;
+
+            gpios = <&gpioa 6 (0 << 0)>;
             label = "ALARM_LED";
         };
     };
-
 
     buzzer {
         compatible = "gpio-leds";

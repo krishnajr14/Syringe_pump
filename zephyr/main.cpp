@@ -1,3 +1,10 @@
+/*
+ * main.cpp — Zephyr firmware entry point
+ *
+ * THIS IS THE ONLY FILE THAT INCLUDES ZEPHYR HEADERS.
+ * All business logic lives in include/ and src/ with zero Zephyr deps.
+ */
+
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <cstring>
@@ -59,15 +66,15 @@ public:
     void onAlarm(AlarmType type) noexcept override {
         const char* msg = nullptr;
         switch (type) {
-            case AlarmType::OCCLUSION:       msg = "ALARM:OCCLUSION\r\n";       break;
-            case AlarmType::VOLUME_COMPLETE: msg = "ALARM:INFUSION_COMPLETED\r\n"; break;
-            case AlarmType::POWER_FAULT:     msg = "ALARM:POWER_FAULT\r\n";     break;
-            default:                         msg = "ALARM:UNKNOWN\r\n";          break;
+            case AlarmType::OCCLUSION:       msg = "ALARM:OCCLUSION\r\n\r\n";          break;
+            case AlarmType::VOLUME_COMPLETE: msg = "ALARM:INFUSION_COMPLETED\r\n\r\n";  break;
+            case AlarmType::POWER_FAULT:     msg = "ALARM:POWER_FAULT\r\n\r\n";        break;
+            default:                         msg = "ALARM:UNKNOWN\r\n\r\n";            break;
         }
         txString(msg);
     }
 
-    void onAlarmCleared(AlarmType /*type*/) noexcept override { txString("Alarm Cleared \r\n"); }
+    void onAlarmCleared(AlarmType /*type*/) noexcept override { txString("Alarm Cleared\r\n\r\n"); }
 
 private:
     const struct device* uart_;
@@ -149,13 +156,11 @@ static void pump_tick_fn(void*, void*, void*) {
         if (g_psm != nullptr) {
             if (k_mutex_lock(&psm_mutex, K_NO_WAIT) == 0) {
                 
-                // If the application layer is holding ticks for our 2-second delay window, stall output pulses
                 if (g_hold_execution_ticks) {
                     k_mutex_unlock(&psm_mutex);
                     continue;
                 }
 
-                // Read internal state dynamically to adjust interrupt scaling
                 if (g_psm->currentState() == PumpState::PRIMING) {
                     g_prime_speed_stagger++;
                     if (g_prime_speed_stagger >= 10U) {
@@ -185,8 +190,8 @@ static void uart_rx_fn(void* arg, void*, void*) {
     static uint8_t  lastPos = 0U;
     static PumpState lastReportedState = PumpState::IDLE;
 
-    uart_print(uart, "=== Syringe Pump Ready ===\r\n");
-    uart_print(uart, "Commands: START, STOP, PAUSE, RESUME, SET_RATE <vol_ml> <time_sec>, CLEAR_ALARM, SIM_OCCLUSION\r\n");
+    uart_print(uart, "=== Syringe Pump Ready ===\r\n\r\n");
+    uart_print(uart, "Commands: START, STOP, PAUSE, RESUME, SET_RATE <vol_ml> <time_sec>, CLEAR_ALARM, SIM_OCCLUSION\r\n\r\n");
 
     while (true) {
         // 1. ASYNC STATE MONITORING (Polled at 20 Hz)
@@ -197,28 +202,31 @@ static void uart_rx_fn(void* arg, void*, void*) {
             if (currentState != lastReportedState) {
                 switch (currentState) {
                     case PumpState::PRIMING:
-                        uart_print(uart, "\r\n>> Auto-Transition: Priming (Slower Demo Mode Engaged)...\r\n");
+                        // Auto-transition prints get an extra space after them
+                        uart_print(uart, ">> Auto-Transition: Priming (Slower Demo Mode Engaged)...\r\n\r\n");
                         break;
 
                     case PumpState::INFUSING:
                         g_hold_execution_ticks = true;
-                        g_stepper->disable(); // Cut off motor coil current to freeze mechanical positions completely
+                        g_stepper->disable(); 
                         
-                        uart_print(uart, "\r\n>> Priming Complete. Entering 5-second stabilization delay...\r\n");
-                        k_msleep(5000); // Hold UI execution threads safely for exactly 5 seconds
+                        // Internal timeline logs stay tight together without double newlines
+                        uart_print(uart, ">> Priming Complete. Entering 5-second stabilization delay...\r\n");
+                        k_msleep(5000); 
                         
                         uart_print(uart, ">> Stabilization complete. Starting active infusion cycle!\r\n");
                         g_stepper->enable();
-                        g_hold_execution_ticks = false; // Release the real-time thread to begin tracking steps
+                        g_hold_execution_ticks = false; 
                         
-                        uart_print(uart, ">> Auto-Transition: Infusing...\r\n");
+                        // Final auto-transition target gets the trailing spacing
+                        uart_print(uart, ">> Auto-Transition: Infusing...\r\n\r\n");
                         break;
 
                     case PumpState::COMPLETE:
-                        uart_print(uart, "\r\n>> Auto-Transition: Infusion complete!\r\n");
+                        uart_print(uart, ">> Auto-Transition: Infusion complete!\r\n\r\n");
                         break;
                     case PumpState::OCCLUSION_ALARM:
-                        uart_print(uart, "\r\n>> ALERT: OCCLUSION ALARM DETECTED!\r\n");
+                        uart_print(uart, ">> ALERT: OCCLUSION ALARM DETECTED!\r\n\r\n");
                         break;
                     default:
                         break;
@@ -241,7 +249,7 @@ static void uart_rx_fn(void* arg, void*, void*) {
 
             uart_poll_out(uart, byte);
 
-            // Intercepting user-driven START loop to build our presentation runway
+            // The countdown block strings print sequentially without wide blank lines
             if ((byte == '\n' || byte == '\r') && strcmp(lastCmd, "START") == 0) {
                 uart_print(uart, "\r\n>> Initializing system checks...\r\n");
                 k_msleep(1000);
@@ -269,7 +277,7 @@ static void uart_rx_fn(void* arg, void*, void*) {
             switch (r) {
                 case ParseResult::OK:
                     if (wasSetRate) {
-                        // ─── DYNAMIC RUNTIME ALIGNMENT EXTRACTION (Seconds) ───
+                        // ─── DYNAMIC RUNTIME ALIGNMENT EXTRACTION ───
                         const char* ptr = lastCmd + 9U;
                         uint32_t parsed_vol_ml = 0U;
                         uint32_t parsed_dur_sec = 0U;
@@ -286,55 +294,58 @@ static void uart_rx_fn(void* arg, void*, void*) {
                         }
 
                         if (parsed_vol_ml > 0 && parsed_dur_sec > 0) {
-                            uint32_t calculated_ul_min = ((parsed_vol_ml * 1000U) * 60U) / parsed_dur_sec;
-                            uint32_t adjusted_target_ul = parsed_vol_ml * 1000U;
+                            if (state == PumpState::INFUSING || state == PumpState::PRIMING) {
+                                uart_print(uart, ">> ERROR: Cannot change rate while running! Type STOP first.\r\n\r\n");
+                            } else {
+                                uint32_t calculated_ul_min = ((parsed_vol_ml * 1000U) * 60U) / parsed_dur_sec;
+                                uint32_t adjusted_target_ul = parsed_vol_ml * 1000U;
 
-                            k_mutex_lock(&psm_mutex, K_FOREVER);
-                            g_stepper->resetStepCount();
-                            g_prime_speed_stagger = 0U;
-                            g_hold_execution_ticks = false;
-                            
-                            // Reconstruct the State Machine with fresh target threshold bounds
-                            g_psm->~PumpStateMachine();
-                            g_psm = new (buf_psm) PumpStateMachine{*g_stepper, g_alarms, g_tracker, adjusted_target_ul};
-                            
-                            g_psm->setRate(calculated_ul_min);
-                            k_mutex_unlock(&psm_mutex);
+                                k_mutex_lock(&psm_mutex, K_FOREVER);
+                                g_stepper->resetStepCount();
+                                g_prime_speed_stagger = 0U;
+                                g_hold_execution_ticks = false;
+                                
+                                g_psm->~PumpStateMachine();
+                                g_psm = new (buf_psm) PumpStateMachine{*g_stepper, g_alarms, g_tracker, adjusted_target_ul};
+                                
+                                g_psm->setRate(calculated_ul_min);
+                                k_mutex_unlock(&psm_mutex);
+
+                                uart_print(uart, ">> Rate and volumetric target configured successfully.\r\n\r\n");
+                            }
                         }
-
-                        uart_print(uart, "\r\n>> Rate and volumetric target configured successfully.\r\n");
                         break;
                     }
                     if (strcmp(lastCmd, "CLEAR_ALARM") == 0) {
-                        uart_print(uart, "\r\n>> Alarm cleared. Type RESUME to continue.\r\n");
+                        uart_print(uart, ">> Alarm cleared. Type RESUME to continue.\r\n\r\n");
                         break;
                     }
                     if (strcmp(lastCmd, "SIM_OCCLUSION") == 0) {
-                        uart_print(uart, "\r\n>> Occlusion simulated.\r\n");
+                        uart_print(uart, ">> Occlusion simulated.\r\n\r\n");
                         break;
                     }
                     if (strcmp(lastCmd, "RESUME") == 0) {
-                        uart_print(uart, "\r\n>> Infusion resumed successfully.\r\n");
+                        uart_print(uart, ">> Infusion resumed successfully.\r\n\r\n");
                         break;
                     }
                     if (strcmp(lastCmd, "PAUSE") == 0) {
-                        uart_print(uart, "\r\n>> Infusion paused immediately.\r\n");
+                        uart_print(uart, ">> Infusion paused immediately.\r\n\r\n");
                         break;
                     }
                     if (strcmp(lastCmd, "STOP") == 0) {
-                        uart_print(uart, "\r\n>> Pump stopped. Returning to IDLE.\r\n");
+                        uart_print(uart, ">> Pump stopped. Returning to IDLE.\r\n\r\n");
                         break;
                     }
                     
                     switch (state) {
                         case PumpState::PRIMING:
-                            uart_print(uart, "\r\n>> Priming started...\r\n");
+                            uart_print(uart, ">> Priming started...\r\n\r\n");
                             break;
                         case PumpState::PAUSED:
-                            uart_print(uart, "\r\n>> Paused.\r\n");
+                            uart_print(uart, ">> Paused.\r\n\r\n");
                             break;
                         case PumpState::IDLE:
-                            uart_print(uart, "\r\n>> Stopped. Back to IDLE.\r\n");
+                            uart_print(uart, ">> Stopped. Back to IDLE.\r\n\r\n");
                             break;
                         default:
                             break;
@@ -342,13 +353,13 @@ static void uart_rx_fn(void* arg, void*, void*) {
                     break;
 
                 case ParseResult::ERR_UNKNOWN_CMD:
-                    uart_print(uart, "\r\n>> ERROR: Unknown command.\r\n");
+                    uart_print(uart, ">> ERROR: Unknown command.\r\n\r\n");
                     break;
                 case ParseResult::ERR_BAD_PARAM:
-                    uart_print(uart, "\r\n>> ERROR: Bad parameter. Example: SET_RATE 10 2\r\n");
+                    uart_print(uart, ">> ERROR: Bad parameter. Example: SET_RATE 10 2\r\n\r\n");
                     break;
                 case ParseResult::ERR_TOO_LONG:
-                    uart_print(uart, "\r\n>> ERROR: Command too long.\r\n");
+                    uart_print(uart, ">> ERROR: Command too long.\r\n\r\n");
                     break;
                 case ParseResult::ERR_EMPTY:
                 default:

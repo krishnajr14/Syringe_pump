@@ -10,8 +10,11 @@
  * PB1 → DIR
  * PB2 → EN  (active-low)
  *
- * LED (alarm indicator):
- * PC13 → onboard LD2 (active-high on NUCLEO)
+ * External LED (alarm indicator):
+ * PA6 → Physical D12 Pin on CN5 (active-high)
+ *
+ * Buzzer indicator:
+ * PA10 → Physical D2 Pin on CN9 (active-high)
  *
  * Endstop limit switches:
  * PA8  → ENDSTOP_MIN
@@ -39,12 +42,12 @@
     alarm_leds {
         compatible = "gpio-leds";
         alarm_led: alarm_led {
-            gpios = <&gpioa 5 GPIO_ACTIVE_HIGH>;
+            /* Changed from PA5 to GPIOA Pin 6 to isolate from onboard LD2 */
+            gpios = <&gpioa 6 GPIO_ACTIVE_HIGH>;
             label = "ALARM_LED";
         };
     };
 
-    /* Moved the buzzer node inside the root block under a proper compatible driver */
     buzzer {
         compatible = "gpio-leds";
         buzzer_pin: buzzer_pin {

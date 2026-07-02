@@ -4117,7 +4117,7 @@
 /* Generic property macros: */
 #define DT_N_S_alarm_leds_S_alarm_led_P_gpios_IDX_0_EXISTS 1
 #define DT_N_S_alarm_leds_S_alarm_led_P_gpios_IDX_0_PH DT_N_S_soc_S_pin_controller_48000000_S_gpio_48000000
-#define DT_N_S_alarm_leds_S_alarm_led_P_gpios_IDX_0_VAL_pin 5
+#define DT_N_S_alarm_leds_S_alarm_led_P_gpios_IDX_0_VAL_pin 6
 #define DT_N_S_alarm_leds_S_alarm_led_P_gpios_IDX_0_VAL_pin_EXISTS 1
 #define DT_N_S_alarm_leds_S_alarm_led_P_gpios_IDX_0_VAL_flags 0
 #define DT_N_S_alarm_leds_S_alarm_led_P_gpios_IDX_0_VAL_flags_EXISTS 1
