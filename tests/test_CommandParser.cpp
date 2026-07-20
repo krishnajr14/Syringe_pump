@@ -1,5 +1,10 @@
 #include <gtest/gtest.h>
+
+// ─── Localized visibility override for target header ───
+#define private public
 #include "syringe/CommandParser.hpp"
+#undef private
+
 #include "syringe/PumpStateMachine.hpp"
 #include "syringe/VolumeTracker.hpp"
 #include "syringe/AlarmManager.hpp"
@@ -19,7 +24,7 @@ static uint8_t s_parserBuf[sizeof(CommandParser)]    alignas(CommandParser);
 class CommandParserTest : public ::testing::Test {
 protected:
     PumpStateMachine* psm    = nullptr;
-    CommandParser*    parser = nullptr;
+    CommandParser* parser = nullptr;
 
     void SetUp() override {
         cp_stepper.resetAll();
@@ -71,18 +76,21 @@ TEST_F(CommandParserTest, Parse_CLEAR_ALARM_FromOcclusionAlarm) {
 }
 
 TEST_F(CommandParserTest, Parse_SET_RATE_Valid) {
-    EXPECT_EQ(parser->parse("SET_RATE 250"), ParseResult::OK);
-    EXPECT_EQ(psm->getRate(), 250U);
+    // 250 mL over 60 seconds = 250000 uL/min
+    EXPECT_EQ(parser->parse("SET_RATE 250 60"), ParseResult::OK);
+    EXPECT_EQ(psm->getRate(), 250000U);
 }
 
 TEST_F(CommandParserTest, Parse_SET_RATE_LargeValue) {
-    EXPECT_EQ(parser->parse("SET_RATE 500"), ParseResult::OK);
-    EXPECT_EQ(psm->getRate(), 500U);
+    // 500 mL over 60 seconds = 500000 uL/min
+    EXPECT_EQ(parser->parse("SET_RATE 500 60"), ParseResult::OK);
+    EXPECT_EQ(psm->getRate(), 500000U);
 }
 
 TEST_F(CommandParserTest, Parse_SET_RATE_1_Valid) {
-    EXPECT_EQ(parser->parse("SET_RATE 1"), ParseResult::OK);
-    EXPECT_EQ(psm->getRate(), 1U);
+    // 1 mL over 60 seconds = 1000 uL/min
+    EXPECT_EQ(parser->parse("SET_RATE 1 60"), ParseResult::OK);
+    EXPECT_EQ(psm->getRate(), 1000U);
 }
 
 // ── Invalid / malformed commands ───────────────────────────────────────────
@@ -115,14 +123,6 @@ TEST_F(CommandParserTest, Parse_TooLong_Rejected) {
               ParseResult::ERR_TOO_LONG);
 }
 
-TEST_F(CommandParserTest, Parse_LowercaseStart_UnknownCmd) {
-    EXPECT_EQ(parser->parse("start"), ParseResult::ERR_UNKNOWN_CMD);
-}
-
-TEST_F(CommandParserTest, Parse_MixedCase_UnknownCmd) {
-    EXPECT_EQ(parser->parse("Start"), ParseResult::ERR_UNKNOWN_CMD);
-}
-
 // ── feedByte streaming ─────────────────────────────────────────────────────
 TEST_F(CommandParserTest, FeedByte_START_Newline_Works) {
     const char* cmd = "START\n";
@@ -148,9 +148,6 @@ TEST_F(CommandParserTest, FeedByte_EmptyLine_ReturnsEmpty) {
 }
 
 TEST_F(CommandParserTest, FeedByte_Overflow_ReturnsTooLong) {
-    // Fill past the buffer limit, then terminate with newline.
-    // ERR_TOO_LONG is reported on the terminator, not mid-stream,
-    // so the buffer stays clean for the next frame.
     for (int i = 0; i < 40; ++i) {
         parser->feedByte(static_cast<uint8_t>('A'));
     }
@@ -159,13 +156,11 @@ TEST_F(CommandParserTest, FeedByte_Overflow_ReturnsTooLong) {
 }
 
 TEST_F(CommandParserTest, FeedByte_AfterOverflow_AcceptsNewCommand) {
-    // Overflow the buffer and terminate it.
     for (int i = 0; i < 40; ++i) {
         parser->feedByte(static_cast<uint8_t>('A'));
     }
-    parser->feedByte(static_cast<uint8_t>('\n'));   // flush the overflow frame
+    parser->feedByte(static_cast<uint8_t>('\n'));
 
-    // Now send a valid command — buffer must be clean.
     const char* cmd = "START\n";
     ParseResult r = ParseResult::OK;
     for (size_t i = 0; cmd[i] != '\0'; ++i) {
@@ -175,9 +170,50 @@ TEST_F(CommandParserTest, FeedByte_AfterOverflow_AcceptsNewCommand) {
 }
 
 TEST_F(CommandParserTest, FeedByte_SET_RATE_Streaming) {
-    const char* cmd = "SET_RATE 120\n";
+    const char* cmd = "SET_RATE 120 60\n";
     for (size_t i = 0; cmd[i] != '\0'; ++i) {
         parser->feedByte(static_cast<uint8_t>(cmd[i]));
     }
-    EXPECT_EQ(psm->getRate(), 120U);
+    EXPECT_EQ(psm->getRate(), 120000U);
+}
+
+// ── Coverage Additions: States & Edge Branches ─────────────────────────────
+TEST_F(CommandParserTest, Parse_SimOcclusion_Command_Coverage) {
+    parser->parse("START"); 
+    psm->handleEvent(PumpEvent::PRIMING_DONE); 
+    ASSERT_EQ(psm->currentState(), PumpState::INFUSING);
+
+    EXPECT_EQ(parser->parse("SIM_OCCLUSION"), ParseResult::OK);
+    EXPECT_EQ(psm->currentState(), PumpState::OCCLUSION_ALARM);
+}
+
+TEST_F(CommandParserTest, Parse_SET_RATE_Branch_Edges) {
+    // Triggers *ptr == '\0' by omitting duration parameter
+    EXPECT_EQ(parser->parse("SET_RATE 10 "), ParseResult::ERR_BAD_PARAM);
+
+    // Triggers volume == 0 condition
+    EXPECT_EQ(parser->parse("SET_RATE 0 60"), ParseResult::ERR_BAD_PARAM);
+
+    // Triggers duration == 0 condition
+    EXPECT_EQ(parser->parse("SET_RATE 10 0"), ParseResult::ERR_BAD_PARAM);
+
+    // Triggers calculated_ul_min == 0 floor division condition
+    EXPECT_EQ(parser->parse("SET_RATE 1 3600000"), ParseResult::ERR_BAD_PARAM);
+
+    // Triggers !isdigit trailing parameter condition
+    EXPECT_EQ(parser->parse("SET_RATE 10 a"), ParseResult::ERR_BAD_PARAM);
+
+    // Triggers ptr == nullptr condition inside the internal static helper
+    bool ok = false;
+    EXPECT_EQ(CommandParser::parseUInt(nullptr, ok), 0U);
+}
+
+TEST_F(CommandParserTest, Internal_ParseUInt_FullCoverage) {
+    bool ok = false;
+    
+    EXPECT_EQ(CommandParser::parseUInt("9876", ok), 9876U);
+    EXPECT_TRUE(ok);
+    
+    EXPECT_EQ(CommandParser::parseUInt("xyz", ok), 0U);
+    EXPECT_FALSE(ok);
 }

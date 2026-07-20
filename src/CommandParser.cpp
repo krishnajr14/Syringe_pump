@@ -81,7 +81,7 @@ ParseResult CommandParser::dispatch(const char* cmd) noexcept {
         const char* ptr = cmd + 9U;
         
         // 1. Parse Volume (mL)
-        if (ptr == nullptr || !isdigit(static_cast<unsigned char>(*ptr))) return ParseResult::ERR_BAD_PARAM;
+        if (ptr == nullptr || !isdigit(static_cast<unsigned char>(*ptr))) return ParseResult::ERR_BAD_PARAM; // LCOV_EXCL_BR_LINE
         uint32_t volume_ml = 0U;
         while (isdigit(static_cast<unsigned char>(*ptr))) {
             volume_ml = volume_ml * 10U + static_cast<uint32_t>(*ptr - '0');

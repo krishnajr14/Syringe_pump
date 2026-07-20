@@ -325,8 +325,9 @@ TEST_F(PsmTest, Tick_AutoTransition_PrimingDone_AfterPrimingSteps) {
     auto psm = make(10000U);
     psm.handleEvent(PumpEvent::CMD_START);
     EXPECT_EQ(psm.currentState(), PumpState::PRIMING);
-    // PRIMING_STEP_COUNT = 500
-    for (int i = 0; i < 500; ++i) psm.tick();
+    
+    // Change loop counter from 500 to 1000 to match PRIMING_STEP_COUNT
+    for (int i = 0; i < 1000; ++i) psm.tick(); 
     EXPECT_EQ(psm.currentState(), PumpState::INFUSING);
 }
 
