@@ -3087,6 +3087,10 @@ stm32_lp_tick_source: &lptim1 {
 # 1 "/home/krishna-inc-5836/Downloads/Task_2/Code/syringe_pump_fixed/syringe_pump/zephyr/boards/nucleo_g474re.overlay" 1
 # 24 "/home/krishna-inc-5836/Downloads/Task_2/Code/syringe_pump_fixed/syringe_pump/zephyr/boards/nucleo_g474re.overlay"
 / {
+    aliases {
+        press-sensor = &lps22hb_press;
+    };
+
     stepper_gpios {
         compatible = "gpio-leds";
 
@@ -3139,6 +3143,19 @@ stm32_lp_tick_source: &lptim1 {
     pinctrl-0 = <&usart2_tx_pa2 &usart2_rx_pa3>;
     pinctrl-names = "default";
     status = "okay";
+};
+
+&i2c1 {
+    pinctrl-0 = <&i2c1_scl_pb8 &i2c1_sda_pb9>;
+    pinctrl-names = "default";
+    status = "okay";
+    clock-frequency = <100000>;
+
+    lps22hb_press: lps22hb-press@5c {
+        compatible = "st,lps22hb-press";
+        reg = <0x5c>;
+        status = "okay";
+    };
 };
 # 0 "<command-line>" 2
 # 1 "/home/krishna-inc-5836/zephyrproject/zephyr/misc/empty_file.c"

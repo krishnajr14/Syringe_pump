@@ -22,6 +22,10 @@
  */
 
 / {
+    aliases {
+        press-sensor = &lps22hb_press;
+    };
+
     stepper_gpios {
         compatible = "gpio-leds";
 
@@ -74,4 +78,17 @@
     pinctrl-0 = <&usart2_tx_pa2 &usart2_rx_pa3>;
     pinctrl-names = "default";
     status = "okay";
+};
+
+&i2c1 {
+    pinctrl-0 = <&i2c1_scl_pb8 &i2c1_sda_pb9>;
+    pinctrl-names = "default";
+    status = "okay";
+    clock-frequency = <I2C_BITRATE_STANDARD>;
+
+    lps22hb_press: lps22hb-press@5c {
+        compatible = "st,lps22hb-press";
+        reg = <0x5c>;
+        status = "okay";
+    };
 };

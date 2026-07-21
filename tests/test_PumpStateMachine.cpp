@@ -4,6 +4,7 @@
 #include "syringe/AlarmManager.hpp"
 #include "StepperDriverStub.hpp"
 #include "AlarmObserverStub.hpp"
+#include "PressureSensorStub.hpp"
 
 // ---------------------------------------------------------------------------
 // Static instances — zero heap per project rules
@@ -485,4 +486,82 @@ TEST_F(PsmTest, RateControl_VolumeAccuracy_120ULmin) {
 
     EXPECT_EQ(localTracker.stepCount(), 120U);
     EXPECT_EQ(localTracker.volumeUL(), 120U);
+}
+
+TEST_F(PsmTest, Tick_Infusing_PressureThresholdExceeded_TransitionsToOcclusionAlarm) {
+    static PressureSensorStub pressStub;
+    pressStub.setPressure(1000.0f); // initial pressure baseline
+
+    AlarmManager alarms;
+    AlarmObserverStub obs;
+    alarms.registerObserver(&obs);
+    VolumeTracker tracker{1000U};
+
+    PumpStateMachine psm{g_stepper, alarms, tracker, 10000U, &pressStub};
+    psm.setRate(120U);
+    psm.handleEvent(PumpEvent::CMD_START);
+    psm.handleEvent(PumpEvent::PRIMING_DONE);
+
+    EXPECT_EQ(psm.currentState(), PumpState::INFUSING);
+
+    // Initial tick establishes baseline = 1000.0 hPa
+    psm.tick();
+    EXPECT_EQ(psm.currentState(), PumpState::INFUSING);
+
+    // Pressure increases by 40 hPa (1040 hPa < 1050 hPa) -> remains INFUSING
+    pressStub.setPressure(1040.0f);
+    psm.tick();
+    EXPECT_EQ(psm.currentState(), PumpState::INFUSING);
+
+    // Pressure increases by 55 hPa (1055 hPa >= 1050 hPa) -> triggers OCCLUSION_ALARM
+    pressStub.setPressure(1055.0f);
+    psm.tick();
+
+    EXPECT_EQ(psm.currentState(), PumpState::OCCLUSION_ALARM);
+    EXPECT_TRUE(alarms.isActive(AlarmType::OCCLUSION));
+    EXPECT_EQ(obs.raiseCount(), 1U);
+    EXPECT_EQ(obs.lastRaised(), AlarmType::OCCLUSION);
+}
+
+TEST_F(PsmTest, OcclusionAlarm_ClearAndResume_DoesNotRepeatedlyTriggerOcclusion) {
+    static PressureSensorStub pressStub;
+    pressStub.setPressure(1000.0f); // initial pressure baseline
+
+    AlarmManager alarms;
+    AlarmObserverStub obs;
+    alarms.registerObserver(&obs);
+    VolumeTracker tracker{1000U};
+
+    PumpStateMachine psm{g_stepper, alarms, tracker, 10000U, &pressStub};
+    psm.setRate(120U);
+    psm.handleEvent(PumpEvent::CMD_START);
+    psm.handleEvent(PumpEvent::PRIMING_DONE);
+
+    // Initial tick establishes baseline = 1000.0 hPa
+    psm.tick();
+    EXPECT_EQ(psm.currentState(), PumpState::INFUSING);
+
+    // Occlusion occurs: pressure rises to 1055 hPa (delta 55 hPa >= 50 hPa)
+    pressStub.setPressure(1055.0f);
+    psm.tick();
+    EXPECT_EQ(psm.currentState(), PumpState::OCCLUSION_ALARM);
+    EXPECT_TRUE(alarms.isActive(AlarmType::OCCLUSION));
+
+    // Clear alarm (ALARM_CLEARED) -> transitions to PAUSED
+    EXPECT_TRUE(psm.handleEvent(PumpEvent::ALARM_CLEARED));
+    EXPECT_EQ(psm.currentState(), PumpState::PAUSED);
+    EXPECT_FALSE(alarms.isActive(AlarmType::OCCLUSION));
+
+    // Occlusion is cleared physically or line pressure settles at 1010.0 hPa
+    pressStub.setPressure(1010.0f);
+
+    // Resume infusion (CMD_RESUME) -> transitions to INFUSING
+    EXPECT_TRUE(psm.handleEvent(PumpEvent::CMD_RESUME));
+    EXPECT_EQ(psm.currentState(), PumpState::INFUSING);
+
+    // Next tick in INFUSING re-establishes base pressure and does NOT trigger occlusion
+    psm.tick();
+    EXPECT_EQ(psm.currentState(), PumpState::INFUSING);
+    EXPECT_FALSE(alarms.isActive(AlarmType::OCCLUSION));
+    EXPECT_FLOAT_EQ(alarms.getBasePressure(), 1010.0f);
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "syringe/hal/IStepperDriver.hpp"
+#include "syringe/hal/IPressureSensor.hpp"
 #include "syringe/AlarmManager.hpp"
 #include "syringe/VolumeTracker.hpp"
 #include <cstdint>
@@ -27,7 +28,7 @@ enum class PumpEvent : uint8_t {
     CMD_RESUME        = 3,   // UART: "RESUME"
     PRIMING_DONE      = 4,   // Internal: priming step count reached
     VOLUME_REACHED    = 5,   // Internal: tracker.volumeUL() >= target
-    OCCLUSION_DETECT  = 6,   // Internal: simulated / endstop triggered
+    OCCLUSION_DETECT  = 6,   // Internal: simulated / endstop / pressure sensor triggered
     ALARM_CLEARED     = 7    // UART: "CLEAR_ALARM"
 };
 
@@ -37,19 +38,21 @@ enum class PumpEvent : uint8_t {
 // Transition table enforces IEC 60601-2-24 Table 101 validity.
 //
 // Dependencies injected at construction (no ownership):
-//   IStepperDriver& — step / enable / disable motor
-//   AlarmManager&   — raise / clear alarms
-//   VolumeTracker&  — accumulate delivered volume
+//   IStepperDriver&   — step / enable / disable motor
+//   AlarmManager&     — raise / clear alarms
+//   VolumeTracker&    — accumulate delivered volume
+//   IPressureSensor*  — optional pressure sensor (LPS22HB)
 //
 // tick() must be called periodically (e.g. every 200 µs from a Zephyr
 // thread). It steps the motor and auto-fires VOLUME_REACHED when done.
 // ---------------------------------------------------------------------------
 class PumpStateMachine {
 public:
-    PumpStateMachine(IStepperDriver& stepper,
-                     AlarmManager&   alarms,
-                     VolumeTracker&  tracker,
-                     uint32_t        targetVolumeUL) noexcept;
+    PumpStateMachine(IStepperDriver&  stepper,
+                     AlarmManager&    alarms,
+                     VolumeTracker&   tracker,
+                     uint32_t         targetVolumeUL,
+                     IPressureSensor* pressureSensor = nullptr) noexcept;
 
     // Process an event. Returns true if transition was valid, false if
     // the event is illegal in the current state (state unchanged).
@@ -66,10 +69,14 @@ public:
 
     PumpState currentState() const noexcept;
 
+    void setPressureSensor(IPressureSensor* sensor) noexcept { pressureSensor_ = sensor; }
+
 private:
-    IStepperDriver& stepper_;
-    AlarmManager&   alarms_;
-    VolumeTracker&  tracker_;
+    IStepperDriver&  stepper_;
+    AlarmManager&    alarms_;
+    VolumeTracker&   tracker_;
+    IPressureSensor* pressureSensor_{nullptr};
+
 
     PumpState state_{PumpState::IDLE};
     uint32_t  targetVolumeUL_;

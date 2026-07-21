@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "syringe/AlarmManager.hpp"
 #include "AlarmObserverStub.hpp"
+#include "PressureSensorStub.hpp"
 
 // Static stubs — zero heap
 static AlarmObserverStub s_obs1;
@@ -8,6 +9,7 @@ static AlarmObserverStub s_obs2;
 static AlarmObserverStub s_obs3;
 static AlarmObserverStub s_obs4;
 static AlarmObserverStub s_obs5;   // used for overflow test
+static PressureSensorStub s_pressStub;
 
 class AlarmManagerTest : public ::testing::Test {
 protected:
@@ -15,6 +17,7 @@ protected:
     void SetUp() override {
         s_obs1.reset(); s_obs2.reset();
         s_obs3.reset(); s_obs4.reset(); s_obs5.reset();
+        s_pressStub = PressureSensorStub{};
         am = AlarmManager{};
     }
 };
@@ -139,3 +142,77 @@ TEST_F(AlarmManagerTest, PowerFault_RaisedAndCleared) {
     EXPECT_EQ(s_obs1.raiseCount(), 1U);
     EXPECT_EQ(s_obs1.clearCount(), 1U);
 }
+
+// ── Pressure Sensor Occlusion (50 hPa threshold) ──────────────────────────
+TEST_F(AlarmManagerTest, BasePressure_DefaultAndSetGet) {
+    EXPECT_FALSE(am.isBasePressureSet());
+    EXPECT_FLOAT_EQ(am.getBasePressure(), DEFAULT_BASE_PRESSURE_HPA);
+    am.setBasePressure(1000.0f);
+    EXPECT_TRUE(am.isBasePressureSet());
+    EXPECT_FLOAT_EQ(am.getBasePressure(), 1000.0f);
+    am.resetBasePressure();
+    EXPECT_FALSE(am.isBasePressureSet());
+}
+
+TEST_F(AlarmManagerTest, PressureOcclusion_FirstReading_SetsBasePressure) {
+    am.registerObserver(&s_obs1);
+    EXPECT_FALSE(am.checkPressureOcclusion(1013.25f));
+    EXPECT_TRUE(am.isBasePressureSet());
+    EXPECT_FLOAT_EQ(am.getBasePressure(), 1013.25f);
+    EXPECT_FALSE(am.isActive(AlarmType::OCCLUSION));
+}
+
+TEST_F(AlarmManagerTest, PressureOcclusion_Below50hPa_DoesNotTrigger) {
+    am.registerObserver(&s_obs1);
+    am.setBasePressure(1000.0f);
+    EXPECT_FALSE(am.checkPressureOcclusion(1049.9f));
+    EXPECT_FALSE(am.isActive(AlarmType::OCCLUSION));
+    EXPECT_EQ(s_obs1.raiseCount(), 0U);
+}
+
+TEST_F(AlarmManagerTest, PressureOcclusion_AtOrAbove50hPa_TriggersOcclusion) {
+    am.registerObserver(&s_obs1);
+    am.setBasePressure(1000.0f);
+    EXPECT_TRUE(am.checkPressureOcclusion(1050.0f));
+    EXPECT_TRUE(am.isActive(AlarmType::OCCLUSION));
+    EXPECT_EQ(s_obs1.raiseCount(), 1U);
+    EXPECT_EQ(s_obs1.lastRaised(), AlarmType::OCCLUSION);
+}
+
+TEST_F(AlarmManagerTest, PressureSensorStub_PollAndThresholdCheck) {
+    am.registerObserver(&s_obs1);
+    s_pressStub.setPressure(1000.0f);
+    
+    // First read establishes base pressure = 1000.0 hPa
+    EXPECT_FALSE(am.checkPressureSensor(s_pressStub));
+    EXPECT_FLOAT_EQ(am.getBasePressure(), 1000.0f);
+
+    // Increase to 1030 hPa (delta 30 hPa < 50 hPa)
+    s_pressStub.setPressure(1030.0f);
+    EXPECT_FALSE(am.checkPressureSensor(s_pressStub));
+    EXPECT_FALSE(am.isActive(AlarmType::OCCLUSION));
+
+    // Increase to 1055 hPa (delta 55 hPa >= 50 hPa)
+    s_pressStub.setPressure(1055.0f);
+    EXPECT_TRUE(am.checkPressureSensor(s_pressStub));
+    EXPECT_TRUE(am.isActive(AlarmType::OCCLUSION));
+    EXPECT_EQ(s_obs1.raiseCount(), 1U);
+}
+
+TEST_F(AlarmManagerTest, PressureSensorStub_ReadError_ReturnsFalse) {
+    am.registerObserver(&s_obs1);
+    s_pressStub.setReadFailure(true);
+    EXPECT_FALSE(am.checkPressureSensor(s_pressStub));
+    EXPECT_FALSE(am.isActive(AlarmType::OCCLUSION));
+}
+
+TEST_F(AlarmManagerTest, Clear_OcclusionAlarm_ResetsBasePressure) {
+    am.setBasePressure(1000.0f);
+    EXPECT_TRUE(am.isBasePressureSet());
+    am.raise(AlarmType::OCCLUSION);
+    EXPECT_TRUE(am.isActive(AlarmType::OCCLUSION));
+    am.clear(AlarmType::OCCLUSION);
+    EXPECT_FALSE(am.isActive(AlarmType::OCCLUSION));
+    EXPECT_FALSE(am.isBasePressureSet());
+}
+

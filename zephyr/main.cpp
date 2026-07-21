@@ -11,6 +11,7 @@
 #include <cctype>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/sensor.h>
 
 K_MUTEX_DEFINE(psm_mutex);
 
@@ -21,6 +22,7 @@ K_MUTEX_DEFINE(psm_mutex);
 #include "syringe/CommandParser.hpp"
 #include "syringe/hal/IStepperDriver.hpp"
 #include "syringe/hal/IAlarmObserver.hpp"
+#include "syringe/hal/IPressureSensor.hpp"
 
 // ============================================================
 // Concrete HAL implementations
@@ -56,6 +58,31 @@ private:
     struct gpio_dt_spec dir_;
     struct gpio_dt_spec en_;
     uint32_t stepCount_{0U};
+};
+
+class ZephyrLPS22HBDriver final : public IPressureSensor {
+public:
+    explicit ZephyrLPS22HBDriver(const struct device* dev) noexcept
+        : dev_(dev) {}
+
+    bool readPressureHPa(float& pressureHPa) noexcept override {
+        if (dev_ == nullptr || !device_is_ready(dev_)) {
+            return false;
+        }
+        if (sensor_sample_fetch(dev_) != 0) {
+            return false;
+        }
+        struct sensor_value val;
+        if (sensor_channel_get(dev_, SENSOR_CHAN_PRESS, &val) != 0) {
+            return false;
+        }
+        float kPa = static_cast<float>(val.val1) + (static_cast<float>(val.val2) / 1000000.0f);
+        pressureHPa = kPa * 10.0f;
+        return true;
+    }
+
+private:
+    const struct device* dev_;
 };
 
 class UartAlarmObserver final : public IAlarmObserver {
@@ -117,16 +144,18 @@ static constexpr uint32_t DEFAULT_VOL   = 10000U;   // 10 mL default fallback
 static VolumeTracker g_tracker{NL_PER_STEP};
 static AlarmManager  g_alarms;
 
-static uint8_t buf_stepper   [sizeof(ZephyrStepperDriver)]  alignas(ZephyrStepperDriver);
-static uint8_t buf_uartObs   [sizeof(UartAlarmObserver)]    alignas(UartAlarmObserver);
-static uint8_t buf_ledObs    [sizeof(LedAlarmObserver)]     alignas(LedAlarmObserver);
-static uint8_t buf_buzzerObs [sizeof(BuzzerAlarmObserver)]  alignas(BuzzerAlarmObserver);
-static uint8_t buf_psm       [sizeof(PumpStateMachine)]     alignas(PumpStateMachine);
-static uint8_t buf_parser    [sizeof(CommandParser)]        alignas(CommandParser);
+static uint8_t buf_stepper     [sizeof(ZephyrStepperDriver)]  alignas(ZephyrStepperDriver);
+static uint8_t buf_pressSensor [sizeof(ZephyrLPS22HBDriver)] alignas(ZephyrLPS22HBDriver);
+static uint8_t buf_uartObs     [sizeof(UartAlarmObserver)]    alignas(UartAlarmObserver);
+static uint8_t buf_ledObs      [sizeof(LedAlarmObserver)]     alignas(LedAlarmObserver);
+static uint8_t buf_buzzerObs   [sizeof(BuzzerAlarmObserver)]  alignas(BuzzerAlarmObserver);
+static uint8_t buf_psm         [sizeof(PumpStateMachine)]     alignas(PumpStateMachine);
+static uint8_t buf_parser      [sizeof(CommandParser)]        alignas(CommandParser);
 
-static ZephyrStepperDriver* g_stepper = nullptr;
-static PumpStateMachine* g_psm     = nullptr;
-static CommandParser* g_parser  = nullptr;
+static ZephyrStepperDriver* g_stepper     = nullptr;
+static ZephyrLPS22HBDriver* g_pressSensor = nullptr;
+static PumpStateMachine*    g_psm         = nullptr;
+static CommandParser*       g_parser      = nullptr;
 
 static struct gpio_dt_spec global_step_spec;
 static struct gpio_dt_spec global_dir_spec;
@@ -306,7 +335,7 @@ static void uart_rx_fn(void* arg, void*, void*) {
                                 g_hold_execution_ticks = false;
                                 
                                 g_psm->~PumpStateMachine();
-                                g_psm = new (buf_psm) PumpStateMachine{*g_stepper, g_alarms, g_tracker, adjusted_target_ul};
+                                g_psm = new (buf_psm) PumpStateMachine{*g_stepper, g_alarms, g_tracker, adjusted_target_ul, g_pressSensor};
                                 
                                 g_psm->setRate(calculated_ul_min);
                                 k_mutex_unlock(&psm_mutex);
@@ -388,6 +417,13 @@ int main(void) {
     gpio_pin_configure_dt(&led_spec,         GPIO_OUTPUT_INACTIVE);
     gpio_pin_configure_dt(&buzzer_spec,      GPIO_OUTPUT_INACTIVE);
 
+#if DT_NODE_EXISTS(DT_NODELABEL(lps22hb_press))
+    const struct device* press_dev = DEVICE_DT_GET(DT_NODELABEL(lps22hb_press));
+    if (device_is_ready(press_dev)) {
+        g_pressSensor = new (buf_pressSensor) ZephyrLPS22HBDriver{press_dev};
+    }
+#endif
+
     g_stepper       = new (buf_stepper)   ZephyrStepperDriver{global_step_spec, global_dir_spec, global_en_spec};
     auto* uartObs   = new (buf_uartObs)   UartAlarmObserver{uart};
     auto* ledObs    = new (buf_ledObs)    LedAlarmObserver{led_spec};
@@ -397,7 +433,7 @@ int main(void) {
     g_alarms.registerObserver(ledObs);
     g_alarms.registerObserver(buzzerObs);
 
-    g_psm    = new (buf_psm)    PumpStateMachine{*g_stepper, g_alarms, g_tracker, DEFAULT_VOL};
+    g_psm    = new (buf_psm)    PumpStateMachine{*g_stepper, g_alarms, g_tracker, DEFAULT_VOL, g_pressSensor};
     g_parser = new (buf_parser) CommandParser{*g_psm};
 
     k_timer_init(&pump_timer, nullptr, nullptr);

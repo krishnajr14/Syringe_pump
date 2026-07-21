@@ -33,6 +33,9 @@ void AlarmManager::clear(AlarmType type) noexcept {
         return;   // Not active — nothing to clear (idempotent).
     }
     activeAlarms_ &= static_cast<uint8_t>(~b);
+    if (type == AlarmType::OCCLUSION) {
+        resetBasePressure();
+    }
     for (uint8_t i = 0; i < count_; ++i) {
         observers_[i]->onAlarmCleared(type);
     }
@@ -47,3 +50,45 @@ bool AlarmManager::isActive(AlarmType type) const noexcept {
 uint8_t AlarmManager::observerCount() const noexcept {
     return count_;
 }
+
+// ---------------------------------------------------------------------------
+void AlarmManager::setBasePressure(float baseHPa) noexcept {
+    basePressureHPa_ = baseHPa;
+    basePressureSet_ = true;
+}
+
+float AlarmManager::getBasePressure() const noexcept {
+    return basePressureHPa_;
+}
+
+bool AlarmManager::isBasePressureSet() const noexcept {
+    return basePressureSet_;
+}
+
+void AlarmManager::resetBasePressure() noexcept {
+    basePressureHPa_ = DEFAULT_BASE_PRESSURE_HPA;
+    basePressureSet_ = false;
+}
+
+// ---------------------------------------------------------------------------
+bool AlarmManager::checkPressureOcclusion(float currentHPa) noexcept {
+    if (!basePressureSet_) {
+        setBasePressure(currentHPa);
+        return false;
+    }
+    if ((currentHPa - basePressureHPa_) >= OCCLUSION_PRESSURE_THRESHOLD_HPA) {
+        raise(AlarmType::OCCLUSION);
+        return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+bool AlarmManager::checkPressureSensor(IPressureSensor& sensor) noexcept {
+    float currentHPa = 0.0f;
+    if (!sensor.readPressureHPa(currentHPa)) {
+        return false;
+    }
+    return checkPressureOcclusion(currentHPa);
+}
+

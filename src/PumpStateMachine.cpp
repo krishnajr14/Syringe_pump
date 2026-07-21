@@ -1,13 +1,15 @@
 #include "syringe/PumpStateMachine.hpp"
 
 // ---------------------------------------------------------------------------
-PumpStateMachine::PumpStateMachine(IStepperDriver& stepper,
-                                   AlarmManager&   alarms,
-                                   VolumeTracker&  tracker,
-                                   uint32_t        targetVolumeUL) noexcept
+PumpStateMachine::PumpStateMachine(IStepperDriver&  stepper,
+                                   AlarmManager&    alarms,
+                                   VolumeTracker&   tracker,
+                                   uint32_t         targetVolumeUL,
+                                   IPressureSensor* pressureSensor) noexcept
     : stepper_(stepper)
     , alarms_(alarms)
     , tracker_(tracker)
+    , pressureSensor_(pressureSensor)
     , targetVolumeUL_(targetVolumeUL)
 {}
 
@@ -98,7 +100,7 @@ bool PumpStateMachine::handleEvent(PumpEvent event) noexcept {
 // ---------------------------------------------------------------------------
 // tick() — called every 200 µs from Zephyr pump thread.
 // Drives the motor one microstep per call while PRIMING or INFUSING.
-// Auto-fires PRIMING_DONE and VOLUME_REACHED when thresholds are hit.
+// Auto-fires PRIMING_DONE, VOLUME_REACHED, or OCCLUSION_DETECT when thresholds are hit.
 // ---------------------------------------------------------------------------
 void PumpStateMachine::tick() noexcept {
     if (state_ == PumpState::PRIMING) {
@@ -111,6 +113,13 @@ void PumpStateMachine::tick() noexcept {
     }
 
     if (state_ == PumpState::INFUSING) {
+        if (pressureSensor_ != nullptr) {
+            if (alarms_.checkPressureSensor(*pressureSensor_)) {
+                handleEvent(PumpEvent::OCCLUSION_DETECT);
+                return;
+            }
+        }
+
         if (stepIntervalUs_ == 0U) return;   // no rate set — do nothing
 
         tickAccumulatorUs_ += 200U;           // each tick = 200 µs
@@ -125,6 +134,7 @@ void PumpStateMachine::tick() noexcept {
         }
     }
 }
+
 
 // ---------------------------------------------------------------------------
 void PumpStateMachine::setRate(uint32_t uLperMin) noexcept {
@@ -170,6 +180,7 @@ void PumpStateMachine::enterIdle() noexcept {
     primingSteps_ = 0U;
     alarms_.clear(AlarmType::OCCLUSION);
     alarms_.clear(AlarmType::VOLUME_COMPLETE);
+    alarms_.resetBasePressure();
 }
 
 void PumpStateMachine::enterPriming() noexcept {
@@ -182,6 +193,7 @@ void PumpStateMachine::enterInfusing() noexcept {
     tickAccumulatorUs_ = 0U;   // add this line
     stepper_.setDirection(true);
     stepper_.enable();
+    alarms_.resetBasePressure();
 }
 
 void PumpStateMachine::enterPaused() noexcept {
