@@ -20,7 +20,7 @@
 // ---------------------------------------------------------------------------
 
 inline constexpr size_t MAX_ALARM_OBSERVERS = 4U;
-inline constexpr float OCCLUSION_PRESSURE_THRESHOLD_HPA = 50.0f;
+inline constexpr float OCCLUSION_PRESSURE_THRESHOLD_HPA = 1.0f;
 inline constexpr float DEFAULT_BASE_PRESSURE_HPA = 1013.25f;
 
 class AlarmManager {

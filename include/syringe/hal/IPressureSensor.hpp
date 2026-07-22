@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 class IPressureSensor {
 public:
-    virtual ~IPressureSensor() = default;
+    virtual ~IPressureSensor() = default;    // LCOV_EXCL_LINE
 
     // Read current pressure in hectopascals (hPa).
     // Returns true on successful read, false on I2C / sensor fault.

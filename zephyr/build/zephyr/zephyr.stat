@@ -8,9 +8,9 @@ ELF Header:
   Type:                              EXEC (Executable file)
   Machine:                           ARM
   Version:                           0x1
-  Entry point address:               0x8001869
+  Entry point address:               0x8001835
   Start of program headers:          52 (bytes into file)
-  Start of section headers:          831856 (bytes into file)
+  Start of section headers:          831840 (bytes into file)
   Flags:                             0x5000200, Version5 EABI, soft-float ABI
   Size of this header:               52 (bytes)
   Size of program headers:           32 (bytes)
@@ -49,9 +49,9 @@ Section Headers:
   [25] .debug_ranges     PROGBITS        00000000 0b75b0 004b38 00      0   0  8
   [26] .ARM.attributes   ARM_ATTRIBUTES  00000000 0bc0e8 000032 00      0   0  1
   [27] .last_section     PROGBITS        08008400 0084f4 000004 00   A  0   0  1
-  [28] .symtab           SYMTAB          00000000 0bc11c 008160 10     29 1213  4
-  [29] .strtab           STRTAB          00000000 0c427c 006dc0 00      0   0  1
-  [30] .shstrtab         STRTAB          00000000 0cb03c 000133 00      0   0  1
+  [28] .symtab           SYMTAB          00000000 0bc11c 008150 10     29 1212  4
+  [29] .strtab           STRTAB          00000000 0c426c 006dc0 00      0   0  1
+  [30] .shstrtab         STRTAB          00000000 0cb02c 000133 00      0   0  1
 Key to Flags:
   W (write), A (alloc), X (execute), M (merge), S (strings), I (info),
   L (link order), O (extra OS processing required), G (group), T (TLS),
