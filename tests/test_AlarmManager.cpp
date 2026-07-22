@@ -143,7 +143,7 @@ TEST_F(AlarmManagerTest, PowerFault_RaisedAndCleared) {
     EXPECT_EQ(s_obs1.clearCount(), 1U);
 }
 
-// ── Pressure Sensor Occlusion (50 hPa threshold) ──────────────────────────
+// ── Pressure Sensor Occlusion (1 hPa threshold) ──────────────────────────
 TEST_F(AlarmManagerTest, BasePressure_DefaultAndSetGet) {
     EXPECT_FALSE(am.isBasePressureSet());
     EXPECT_FLOAT_EQ(am.getBasePressure(), DEFAULT_BASE_PRESSURE_HPA);
@@ -162,18 +162,18 @@ TEST_F(AlarmManagerTest, PressureOcclusion_FirstReading_SetsBasePressure) {
     EXPECT_FALSE(am.isActive(AlarmType::OCCLUSION));
 }
 
-TEST_F(AlarmManagerTest, PressureOcclusion_Below50hPa_DoesNotTrigger) {
+TEST_F(AlarmManagerTest, PressureOcclusion_Below1hPa_DoesNotTrigger) {
     am.registerObserver(&s_obs1);
     am.setBasePressure(1000.0f);
-    EXPECT_FALSE(am.checkPressureOcclusion(1049.9f));
+    EXPECT_FALSE(am.checkPressureOcclusion(1000.9f));
     EXPECT_FALSE(am.isActive(AlarmType::OCCLUSION));
     EXPECT_EQ(s_obs1.raiseCount(), 0U);
 }
 
-TEST_F(AlarmManagerTest, PressureOcclusion_AtOrAbove50hPa_TriggersOcclusion) {
+TEST_F(AlarmManagerTest, PressureOcclusion_AtOrAbove1hPa_TriggersOcclusion) {
     am.registerObserver(&s_obs1);
     am.setBasePressure(1000.0f);
-    EXPECT_TRUE(am.checkPressureOcclusion(1050.0f));
+    EXPECT_TRUE(am.checkPressureOcclusion(1001.0f));
     EXPECT_TRUE(am.isActive(AlarmType::OCCLUSION));
     EXPECT_EQ(s_obs1.raiseCount(), 1U);
     EXPECT_EQ(s_obs1.lastRaised(), AlarmType::OCCLUSION);
@@ -187,13 +187,13 @@ TEST_F(AlarmManagerTest, PressureSensorStub_PollAndThresholdCheck) {
     EXPECT_FALSE(am.checkPressureSensor(s_pressStub));
     EXPECT_FLOAT_EQ(am.getBasePressure(), 1000.0f);
 
-    // Increase to 1030 hPa (delta 30 hPa < 50 hPa)
-    s_pressStub.setPressure(1030.0f);
+    // Increase to 1000.5 hPa (delta 0.5 hPa < 1.0 hPa)
+    s_pressStub.setPressure(1000.5f);
     EXPECT_FALSE(am.checkPressureSensor(s_pressStub));
     EXPECT_FALSE(am.isActive(AlarmType::OCCLUSION));
 
-    // Increase to 1055 hPa (delta 55 hPa >= 50 hPa)
-    s_pressStub.setPressure(1055.0f);
+    // Increase to 1001.5 hPa (delta 1.5 hPa >= 1.0 hPa)
+    s_pressStub.setPressure(1001.5f);
     EXPECT_TRUE(am.checkPressureSensor(s_pressStub));
     EXPECT_TRUE(am.isActive(AlarmType::OCCLUSION));
     EXPECT_EQ(s_obs1.raiseCount(), 1U);

@@ -508,13 +508,13 @@ TEST_F(PsmTest, Tick_Infusing_PressureThresholdExceeded_TransitionsToOcclusionAl
     psm.tick();
     EXPECT_EQ(psm.currentState(), PumpState::INFUSING);
 
-    // Pressure increases by 40 hPa (1040 hPa < 1050 hPa) -> remains INFUSING
-    pressStub.setPressure(1040.0f);
+    // Pressure increases by 0.9 hPa (1000.9 hPa < 1001.0 hPa) -> remains INFUSING
+    pressStub.setPressure(1000.9f);
     psm.tick();
     EXPECT_EQ(psm.currentState(), PumpState::INFUSING);
 
-    // Pressure increases by 55 hPa (1055 hPa >= 1050 hPa) -> triggers OCCLUSION_ALARM
-    pressStub.setPressure(1055.0f);
+    // Pressure increases by 1.5 hPa (1001.5 hPa >= 1001.0 hPa) -> triggers OCCLUSION_ALARM
+    pressStub.setPressure(1001.5f);
     psm.tick();
 
     EXPECT_EQ(psm.currentState(), PumpState::OCCLUSION_ALARM);
@@ -541,8 +541,8 @@ TEST_F(PsmTest, OcclusionAlarm_ClearAndResume_DoesNotRepeatedlyTriggerOcclusion)
     psm.tick();
     EXPECT_EQ(psm.currentState(), PumpState::INFUSING);
 
-    // Occlusion occurs: pressure rises to 1055 hPa (delta 55 hPa >= 50 hPa)
-    pressStub.setPressure(1055.0f);
+    // Occlusion occurs: pressure rises to 1001.5 hPa (delta 1.5 hPa >= 1.0 hPa)
+    pressStub.setPressure(1001.5f);
     psm.tick();
     EXPECT_EQ(psm.currentState(), PumpState::OCCLUSION_ALARM);
     EXPECT_TRUE(alarms.isActive(AlarmType::OCCLUSION));
