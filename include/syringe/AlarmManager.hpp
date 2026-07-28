@@ -46,8 +46,6 @@ public:
     bool  isBasePressureSet() const noexcept;
     void  resetBasePressure() noexcept;
 
-    // Evaluates current pressure against base pressure + 50 hPa threshold.
-    // If threshold exceeded, calls raise(AlarmType::OCCLUSION) and returns true.
     bool checkPressureOcclusion(float currentHPa) noexcept;
 
     // Polls IPressureSensor, updates base pressure if not set, and evaluates threshold.

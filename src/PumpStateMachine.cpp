@@ -185,12 +185,12 @@ void PumpStateMachine::enterIdle() noexcept {
 
 void PumpStateMachine::enterPriming() noexcept {
     primingSteps_ = 0U;
-    stepper_.setDirection(true);   // forward = infuse direction
+    stepper_.setDirection(true); 
     stepper_.enable();
 }
 
 void PumpStateMachine::enterInfusing() noexcept {
-    tickAccumulatorUs_ = 0U;   // add this line
+    tickAccumulatorUs_ = 0U;   
     stepper_.setDirection(true);
     stepper_.enable();
     alarms_.resetBasePressure();

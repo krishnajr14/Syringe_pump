@@ -1,10 +1,3 @@
-/*
- * main.cpp — Zephyr firmware entry point
- *
- * THIS IS THE ONLY FILE THAT INCLUDES ZEPHYR HEADERS.
- * All business logic lives in include/ and src/ with zero Zephyr deps.
- */
-
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <cstring>
@@ -23,10 +16,6 @@ K_MUTEX_DEFINE(psm_mutex);
 #include "syringe/hal/IStepperDriver.hpp"
 #include "syringe/hal/IAlarmObserver.hpp"
 #include "syringe/hal/IPressureSensor.hpp"
-
-// ============================================================
-// Concrete HAL implementations
-// ============================================================
 
 class ZephyrStepperDriver final : public IStepperDriver {
 public:
@@ -135,9 +124,6 @@ private:
     struct gpio_dt_spec buzzer_;
 };
 
-// ============================================================
-// Static storage — Zero heap allocation runtime buffers
-// ============================================================
 static constexpr uint32_t NL_PER_STEP   = 1000U;    // 1 step = 1 µL
 static constexpr uint32_t DEFAULT_VOL   = 10000U;   // 10 mL default fallback
 
@@ -171,9 +157,6 @@ static void uart_print(const struct device* uart, const char* msg) {
     while (msg && *msg) { uart_poll_out(uart, *msg++); }
 }
 
-// ============================================================
-// Pump execution synchronization (Real-Time Priority 2 Window)
-// ============================================================
 static struct k_timer pump_timer;
 K_THREAD_STACK_DEFINE(pump_stack, 2048);
 static struct k_thread pump_thread;
@@ -232,7 +215,7 @@ static void uart_rx_fn(void* arg, void*, void*) {
                 switch (currentState) {
                     case PumpState::PRIMING:
                         // Auto-transition prints get an extra space after them
-                        uart_print(uart, ">> Auto-Transition: Priming (Slower Demo Mode Engaged)...\r\n\r\n");
+                        uart_print(uart, ">> Auto-Transition: Priming...\r\n\r\n");
                         break;
 
                     case PumpState::INFUSING:
@@ -280,6 +263,7 @@ static void uart_rx_fn(void* arg, void*, void*) {
 
             // The countdown block strings print sequentially without wide blank lines
             if ((byte == '\n' || byte == '\r') && strcmp(lastCmd, "START") == 0) {
+                
                 uart_print(uart, "\r\n>> Initializing system checks...\r\n");
                 k_msleep(1000);
                 uart_print(uart, ">> Starting Priming state in 3...\r\n");
@@ -398,9 +382,6 @@ static void uart_rx_fn(void* arg, void*, void*) {
     }
 }
 
-// ============================================================
-// main
-// ============================================================
 int main(void) {
     const struct device* uart = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
     __ASSERT(device_is_ready(uart), "UART not ready");
