@@ -58,20 +58,30 @@ public:
         if (dev_ == nullptr || !device_is_ready(dev_)) {
             return false;
         }
-        if (sensor_sample_fetch(dev_) != 0) {
-            return false;
+
+        int64_t now = k_uptime_get();
+        if (lastFetchMs_ == 0 || (now - lastFetchMs_) >= 50) {
+            if (sensor_sample_fetch(dev_) == 0) {
+                struct sensor_value val;
+                if (sensor_channel_get(dev_, SENSOR_CHAN_PRESS, &val) == 0) {
+                    float kPa = static_cast<float>(val.val1) + (static_cast<float>(val.val2) / 1000000.0f);
+                    cachedPressureHPa_ = kPa * 10.0f;
+                    lastFetchMs_ = now;
+                }
+            }
         }
-        struct sensor_value val;
-        if (sensor_channel_get(dev_, SENSOR_CHAN_PRESS, &val) != 0) {
-            return false;
+
+        if (lastFetchMs_ > 0) {
+            pressureHPa = cachedPressureHPa_;
+            return true;
         }
-        float kPa = static_cast<float>(val.val1) + (static_cast<float>(val.val2) / 1000000.0f);
-        pressureHPa = kPa * 10.0f;
-        return true;
+        return false;
     }
 
 private:
     const struct device* dev_;
+    int64_t lastFetchMs_{0};
+    float cachedPressureHPa_{0.0f};
 };
 
 class UartAlarmObserver final : public IAlarmObserver {
@@ -173,7 +183,9 @@ static void pump_tick_fn(void*, void*, void*) {
                     continue;
                 }
 
-                if (g_psm->currentState() == PumpState::PRIMING) {
+                PumpState stateBefore = g_psm->currentState();
+
+                if (stateBefore == PumpState::PRIMING) {
                     g_prime_speed_stagger++;
                     if (g_prime_speed_stagger >= 10U) {
                         g_psm->tick();
@@ -182,6 +194,13 @@ static void pump_tick_fn(void*, void*, void*) {
                 } else {
                     g_psm->tick();
                 }
+
+                PumpState stateAfter = g_psm->currentState();
+                if (stateBefore == PumpState::PRIMING && stateAfter == PumpState::INFUSING) {
+                    g_hold_execution_ticks = true;
+                    g_stepper->disable();
+                }
+
                 k_mutex_unlock(&psm_mutex);
             }
         }
@@ -207,11 +226,12 @@ static void uart_rx_fn(void* arg, void*, void*) {
 
     while (true) {
         // 1. ASYNC STATE MONITORING (Polled at 20 Hz)
-        if (k_mutex_lock(&psm_mutex, K_NO_WAIT) == 0) {
+        if (k_mutex_lock(&psm_mutex, K_MSEC(10)) == 0) {
             PumpState currentState = g_psm->currentState();
             k_mutex_unlock(&psm_mutex);
 
             if (currentState != lastReportedState) {
+                lastReportedState = currentState;
                 switch (currentState) {
                     case PumpState::PRIMING:
                         // Auto-transition prints get an extra space after them
@@ -219,19 +239,18 @@ static void uart_rx_fn(void* arg, void*, void*) {
                         break;
 
                     case PumpState::INFUSING:
-                        g_hold_execution_ticks = true;
-                        g_stepper->disable(); 
-                        
                         // Internal timeline logs stay tight together without double newlines
                         uart_print(uart, ">> Priming Complete. Entering 5-second stabilization delay...\r\n");
                         k_msleep(5000); 
                         
-                        uart_print(uart, ">> Stabilization complete. Starting active infusion cycle!\r\n");
-                        g_stepper->enable();
-                        g_hold_execution_ticks = false; 
-                        
-                        // Final auto-transition target gets the trailing spacing
-                        uart_print(uart, ">> Auto-Transition: Infusing...\r\n\r\n");
+                        if (g_psm->currentState() == PumpState::INFUSING) {
+                            uart_print(uart, ">> Stabilization complete. Starting active infusion cycle!\r\n");
+                            g_stepper->enable();
+                            g_hold_execution_ticks = false; 
+                            
+                            // Final auto-transition target gets the trailing spacing
+                            uart_print(uart, ">> Auto-Transition: Infusing...\r\n\r\n");
+                        }
                         break;
 
                     case PumpState::COMPLETE:
@@ -243,7 +262,6 @@ static void uart_rx_fn(void* arg, void*, void*) {
                     default:
                         break;
                 }
-                lastReportedState = currentState;
             }
         }
 
